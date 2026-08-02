@@ -1,7 +1,7 @@
 AU
 ==
 
-[![CI](https://github.com/synrc/au/workflows/mix/badge.svg)](https://github.com/synrc/au/actions)
+[![CI](https://github.com/synrc/au/workflows/zen/badge.svg)](https://github.com/synrc/au/actions)
 [![CD](https://img.shields.io/hexpm/v/au.svg?style=flat)](https://hex.pm/packages/au)
 
 `synrc/au` is a minimal, zero-dependency Erlang/OTP library for high-assurance audit
