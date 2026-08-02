@@ -31,4 +31,5 @@ hash_test() ->
     H384 = audit_crypto:hash(Data),
     H512 = audit_crypto:hash(sha512, Data),
     ?assertEqual(48, byte_size(H384)),
-    ?assertEqual(64, byte_size(H512)).
+    ?assertEqual(64, byte_size(H512)),
+    ?assertNot(audit_crypto:verify(<<"invalid_key">>, Data, <<"invalid_sig">>)).

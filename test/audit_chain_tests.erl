@@ -24,12 +24,21 @@ append_and_verify_record_test() ->
 
 tamper_detection_test() ->
     MacKey = audit_crypto:generate_mac_key(),
-    {PubKey, _PrivKey} = audit_crypto:generate_keypair(),
-    Genesis = audit_chain:genesis_hash(<<"node-1">>, 1000),
+    {PubKey, PrivKey} = audit_crypto:generate_keypair(),
+    Genesis = audit_chain:genesis_hash(<<"node-1">>, 0),
 
     R1 = audit_record:new(system, <<"sys">>, boot, <<"kernel">>, start, success, #{}),
     R1Chained = audit_chain:append_record(R1, Genesis, MacKey),
 
     %% Tamper subject
     TamperedR1 = R1Chained#audit_record{subject = <<"hacker">>},
-    ?assertNot(audit_chain:verify_record(TamperedR1, Genesis, MacKey, PubKey)).
+    ?assertNot(audit_chain:verify_record(TamperedR1, Genesis, MacKey, PubKey)),
+
+    %% Signed critical record verified without PubKey -> false
+    R2 = audit_record:new(security, <<"admin">>, key, <<"tpm">>, unseal, success, #{}),
+    R2Signed = audit_chain:append_critical_record(R2, R1Chained#audit_record.prev_hash, MacKey, PrivKey),
+    ?assertNot(audit_chain:verify_record(R2Signed, R1Chained#audit_record.prev_hash, MacKey, undefined)),
+
+    %% Corrupt TSP timestamp token -> false
+    R2BadTSP = R2Signed#audit_record{tsp = <<"bad_tsp_token">>},
+    ?assertNot(audit_chain:verify_record(R2BadTSP, R1Chained#audit_record.prev_hash, MacKey, PubKey)).
