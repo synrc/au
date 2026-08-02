@@ -50,9 +50,8 @@ new(Plane, Subject, Event, Resource, Action, Outcome, Meta) ->
     end.
 
 %% @doc Validates NIST AU-3 mandatory record fields.
--spec validate(#audit_record{}) -> ok | {error, term()}.
-validate(#audit_record{id = Id, ts = TS, plane = Plane, subject = Subj,
-                       event = Ev, resource = Res, action = Act, outcome = Out}) ->
+-spec validate(term()) -> ok | {error, term()}.
+validate({audit_record, Id, TS, Plane, Subj, Ev, Res, Act, Out, _Meta, _PrevHash, _Hmac, _Sig, _Tsp}) ->
     ValidPlane = Plane =:= security orelse Plane =:= system orelse Plane =:= application,
     ValidOutcome = Out =:= success orelse Out =:= failure,
     if
