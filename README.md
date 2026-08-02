@@ -184,7 +184,7 @@ Documentation & Formal Specification
 ------------------------------------
 
 Detailed formal specifications, theoretical derivations, proofs, and NIST attestation matrices are located in:
-- LaTeX source: [`priv/audit.tex`](priv/audit.tex)
+- LaTeX source: [`priv/audi.pdf`](priv/audi.pdf)
 - OS.1 Taxonomy: [`../../synrc/os/os.txt`](https://os.synrc.com/os.txt)
 
 Credits

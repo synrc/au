@@ -69,7 +69,7 @@ validate(#audit_record{id = Id, ts = TS, plane = Plane, subject = Subj,
 validate(_) ->
     {error, not_a_record}.
 
-%% @doc Deterministic canonical binary encoding of payload for hashing & HMAC.
+%% @doc Deterministic canonical binary encoding of payload for hashing &amp; HMAC.
 %% Excludes prev_hash, hmac, sig, and tsp to allow stable hash calculation.
 -spec canonical_payload(#audit_record{}) -> binary().
 canonical_payload(#audit_record{id = Id, ts = TS, plane = Plane, subject = Subj,
