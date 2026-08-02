@@ -1,7 +1,7 @@
-AUDI
-====
+AU
+==
 
-`synrc/audit` is a minimal, zero-dependency Erlang/OTP library for high-assurance audit
+`synrc/au` is a minimal, zero-dependency Erlang/OTP library for high-assurance audit
 logging in the **ERP.1 three-plane architecture** (Security Admin BEAM, System Admin BEAM, Application BEAM).
 
 It enforces strict privilege segregation, fail-secure append-only event logging,
@@ -184,7 +184,7 @@ Documentation & Formal Specification
 ------------------------------------
 
 Detailed formal specifications, theoretical derivations, proofs, and NIST attestation matrices are located in:
-- LaTeX source: [`priv/audi.pdf`](priv/audi.pdf)
+- LaTeX source: [`priv/audit.pdf`](priv/audit.pdf)
 - OS.1 Taxonomy: [`../../synrc/os/os.txt`](https://os.synrc.com/os.txt)
 
 Credits
