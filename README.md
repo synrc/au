@@ -1,6 +1,9 @@
 AU
 ==
 
+[![CI](https://github.com/erpuno/au/workflows/mix/badge.svg)](https://github.com/erpuno/au/actions)
+[![CD](https://img.shields.io/hexpm/v/au.svg?style=flat)](https://hex.pm/packages/au)
+
 `synrc/au` is a minimal, zero-dependency Erlang/OTP library for high-assurance audit
 logging in the **ERP.1 three-plane architecture** (Security Admin BEAM, System Admin BEAM, Application BEAM).
 
