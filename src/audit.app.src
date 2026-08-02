@@ -1,0 +1,15 @@
+{application, audit,
+ [{description, "ERP.1 NIST SP 800-53 Three-Plane Audit Library"},
+  {vsn, "1.0.0"},
+  {registered, [audit_sup, audit_core]},
+  {mod, {audit_app, []}},
+  {applications,
+   [kernel,
+    stdlib,
+    crypto
+   ]},
+  {env,[]},
+  {modules, []},
+  {licenses, ["Apache 2.0"]},
+  {links, []}
+ ]}.

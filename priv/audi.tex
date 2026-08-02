@@ -1,0 +1,277 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[ukrainian,english]{babel}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{geometry}
+\geometry{margin=2.5cm}
+
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{backcolour}{rgb}{0.96,0.96,0.96}
+
+\lstset{
+    backgroundcolor=\color{backcolour},
+    commentstyle=\color{codegray},
+    keywordstyle=\color{blue},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{red},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,
+    breaklines=true,
+    captionpos=b,
+    keepspaces=true,
+    numbers=left,
+    numbersep=5pt,
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    tabsize=2
+}
+
+\title{\textbf{ERP.1 Audit \& Accountability Infrastructure:}\\Formal Taxonomy, Multi-Plane Cryptographic Logs, and NIST SP 800-53 Attestation}
+\author{\textbf{SYNRC Research Group} \\ \texttt{https://synrc.com}}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+This document presents the formal specification, architecture, and theoretical foundation of the \texttt{synrc/audit} library for high-assurance operating environments based on the ERP.1 three-plane architecture. Built upon standard Erlang/OTP primitives and standard NIST cryptography (ECDSA P-384, SHA-384, HMAC-SHA-512), \texttt{synrc/audit} enforces strict privilege segregation, fail-secure append-only event logging, deterministic CRDT Merkle-log merging across multi-DC deployments, and complete compliance with NIST SP 800-53 Rev. 5 Audit and Accountability (AU) controls.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+\section{Introduction \& Motivation}
+High-integrity critical systems (defense appliances, state registries, electronic healthcare, infrastructure control systems) demand rigorous mathematical assurance, non-repudiation, and architectural privilege isolation. Traditional POSIX models featuring monolithic \texttt{root} processes violate Zero Trust Architecture principles by exposing broad ambient authority.
+
+The ERP.1 architecture reduces the Trusted Computing Base (TCB) to a minimal cryptographic core running on Erlang/OTP on UKI Alpine Linux. The \texttt{synrc/audit} library isolates audit generation, aggregation, and signature capabilities across three execution planes, guaranteeing that audit logs remain immutable, cryptographically verifiable, and fail-secure under all operating conditions.
+
+\section{ERP.1 Three-Plane Isolation Model}
+Following the fundamental OS.1 taxonomy defined in \texttt{synrc/os/os.txt}, the execution environment is partitioned into three distinct planes:
+
+\begin{figure}[h!]
+\centering
+\begin{lstlisting}
++-----------------------------------------------------------------------------+
+| Security Admin BEAM   [S]                   (Trusted Security Services)     |
+|  * Highest privilege, minimal TCB (ca, tss, sealed kvs)                     |
+|  * Owns long-term ECDSA P-384 keys, HSM/TPM, root & intermediate CAs        |
+|  * Never opens network sockets or mounts filesystem volumes                 |
+|  * Signs critical audit records & periodic Merkle checkpoints               |
++-----------------------------------------------------------------------------+
+                : sealed, capability-limited length-prefixed channel
++-----------------------------------------------------------------------------+
+| System Admin BEAM     [C]                   (Privileged Control Plane)      |
+|  * Sole owner of kernel operations, seats, network & capability broker      |
+|  * Maintains local append-only hash-chain (SHA-384 + HMAC-SHA-512)          |
+|  * Synchronous fail-secure commits (AU-5)                                   |
+|  * Forwards logs to SIEM (Wazuh)                                            |
++-----------------------------------------------------------------------------+
+                : capability-granted, authenticated bridge
++-----------------------------------------------------------------------------+
+| Application BEAM(s)   [A]                   (Untrusted Domain & Sessions)   |
+|  * Host user interfaces, session logic, and media pipelines                 |
+|  * No access to long-term keys or ambient storage                           |
+|  * Generates local events forwarded exclusively via capability bridge       |
++-----------------------------------------------------------------------------+
+\end{lstlisting}
+\caption{ERP.1 Three-Plane Architecture Isolation Diagram.}
+\end{figure}
+
+\subsection{Plane Descriptions}
+\begin{enumerate}
+    \item \textbf{Security Admin BEAM [S]}: Houses \texttt{synrc/ca}, \texttt{synrc/tss}, and sealed \texttt{synrc/kvs}. Long-term private keys never leave this plane. It provides RFC 3161 timestamps and ECDSA signatures for critical events.
+    \item \textbf{System Admin BEAM [C]}: Runs \texttt{audit\_core}. Handles capability broker passing via \texttt{SCM\_RIGHTS}, maintains the append-only record chain, applies HMAC-SHA-512 integrity tags, and publishes periodic checkpoints.
+    \item \textbf{Application BEAM [A]}: Runs \texttt{audit\_client}. Untrusted workloads operating under strict Landlock, seccomp-bpf, and cgroups v2 boundaries.
+\end{enumerate}
+
+\section{Formal Distributed Audit Model}
+
+\subsection{Audit Invariants}
+Audit processing in ERP.1 satisfies four fundamental invariants:
+\begin{enumerate}
+    \item \textbf{Irreversibility}: Audit entries form an append-only cryptographic hash chain linked via SHA-384 hashes. Past entries cannot be modified or reordered.
+    \item \textbf{Non-Repudiation}: Critical records and batch checkpoints are signed by Security Admin BEAM using ECDSA P-384 keys and sealed with RFC 3161 timestamps.
+    \item \textbf{Isolation}: Application BEAMs cannot read or mutate audit structures of higher planes.
+    \item \textbf{Completeness}: No privileged action (certificate issuance, key unsealing, ABAC policy change, device grant) can execute without a synchronous audit record commit (fail-secure, AU-5).
+\end{enumerate}
+
+\subsection{Record Model (\texttt{\#audit\_record\{\}})}
+Every audit event follows the mandatory schema specified by NIST AU-3:
+\begin{lstlisting}[language=Erlang]
+-record(audit_record, {
+    id          :: binary(),                 % Monotonic ID (64-bit TS + Rand)
+    ts          :: integer(),                % Milliseconds UTC / HLC
+    plane       :: security | system | application,
+    subject     :: binary(),                 % Subject identity
+    event       :: atom(),                   % Event type
+    resource    :: binary(),                 % Resource identifier
+    action      :: atom(),                   % Action performed
+    outcome     :: success | failure,        % Result
+    meta        :: map(),                    % Metadata context
+    prev_hash   :: binary(),                 % SHA-384 of previous link
+    hmac        :: binary(),                 % HMAC-SHA-512 (System plane)
+    sig         :: binary() | undefined,     % ECDSA P-384 (Security plane)
+    tsp         :: binary() | undefined      % RFC 3161 timestamp
+}).
+\end{lstlisting}
+
+\subsection{Multi-Node CRDT Log Merge}
+In multi-node / multi-DC environments, each node maintains a local sequential hash chain. Global consensus is achieved using an \textbf{Add-only Merkle-CRDT} (G-Set of signed checkpoints):
+\begin{equation}
+\text{GlobalLog} = \text{G-Set}\left( \{ \text{NodeId}, \text{HeadHash}, \text{SignedCheckpoint}, \text{MerkleRoot} \} \right)
+\end{equation}
+Merging two node logs $L_A$ and $L_B$ is deterministic and conflict-free:
+\begin{equation}
+\text{merge}(L_A, L_B) = L_A \cup L_B
+\end{equation}
+Linearization sorts records by the tuple $(TS, \text{NodeId}, \text{RecordId})$, producing a deterministic global sequence without altering original node hash chains.
+
+\section{NIST Cryptographic Profile}
+All cryptographic primitives are standard FIPS/NIST compliant:
+\begin{table}[h!]
+\centering
+\begin{tabular}{llll}
+\toprule
+\textbf{Purpose} & \textbf{Algorithm} & \textbf{Specification}  & \textbf{NIST} \\
+\midrule
+Chain & Merkle Hashing & SHA-384 (or SHA-512) & NIST FIPS 180-4 \\
+Message Integrity & HMAC-SHA-512 & NIST FIPS 198-1 \\
+Digital Signature & ECDSA P-384 & NIST FIPS 186-4 (secp384r1) \\
+Timestamp & RFC 3161 & SHA-384 / SHA-512 TimeStampToken \\
+Key Generation & ECDH P-384 & NIST SP 800-56A \\
+\bottomrule
+\end{tabular}
+\caption{NIST Cryptographic Profile for \texttt{synrc/audit}.}
+\end{table}
+
+\section{NIST SP 800-53 Rev. 5 AU Control Attestation}
+
+\begin{table}[h!]
+\centering
+\small
+\begin{tabular}{lp{6cm}c p{5cm}}
+\toprule
+\textbf{Control} & \textbf{Control Name} & \textbf{Plane} & \textbf{Implementation in \texttt{synrc/audit}} \\
+\midrule
+AU-1 & Audit Policy and Procedures & [C] & Defined in CMDB metadata. \\
+AU-2 & Event Selection & [C],[A] & Configurable event masks per plane. \\
+AU-3 & Content of Audit Records & [C] & Mandatory \texttt{\#audit\_record\{\}} schema. \\
+AU-4 & Storage Capacity & [C] & ETS / KVS sizing and segmentation. \\
+AU-5 & Response to Processing Failures & [C] & Synchronous fail-secure \texttt{gen\_server} call. \\
+AU-6 & Review, Analysis, Reporting & [C],[S] & Offline verifier (\texttt{audit\_verify}) \& SIEM export. \\
+AU-7 & Audit Reduction & [C] & Filtered queries and Merkle proofs. \\
+AU-8 & Time Stamps & [C],[S] & UTC ms / HLC + RFC 3161 timestamps. \\
+AU-9 & Protection of Audit Info & [C],[S] & Append-only SHA-384 chain + HMAC-SHA-512. \\
+AU-10 & Non-Repudiation & [S] & ECDSA P-384 signatures by Security plane. \\
+AU-11 & Audit Record Retention & [C] & Archiving tool (\texttt{audit\_archive}) for cold storage. \\
+AU-12 & Audit Generation & [A],[C] & Real-time generation via capability bridge. \\
+\bottomrule
+\end{tabular}
+\caption{NIST SP 800-53 Rev. 5 AU Controls Attestation Matrix.}
+\end{table}
+
+\section{Comprehensive Audit Usage \& Code Examples}
+
+\subsection{1. Starting the Audit Service}
+To initialize the System Admin BEAM aggregator with ECDSA P-384 Security keys:
+\begin{lstlisting}[language=Erlang]
+{PubKey, PrivKey} = audit_crypto:generate_keypair(),
+MacKey = audit_crypto:generate_mac_key(),
+
+{ok, Pid} = audit_core:start_link(#{
+    node_id     => <<"DC1-Node01">>,
+    boot_time   => erlang:system_time(millisecond),
+    mac_key     => MacKey,
+    sec_keypair => {PubKey, PrivKey}
+}).
+\end{lstlisting}
+
+\subsection{2. Logging Standard Application Events (AU-12)}
+From any Application plane process:
+\begin{lstlisting}[language=Erlang]
+ok = audit_client:log(
+    application,
+    <<"user_session_42">>,
+    user_login,
+    <<"/api/v1/auth">>,
+    authenticate,
+    success,
+    #{<<"ip">> => <<"192.168.1.100">>, <<"seat">> => <<"seat0">>}
+).
+\end{lstlisting}
+
+\subsection{3. Logging Critical Security Events with ECDSA Signatures (AU-10)}
+For high-assurance operations requiring non-repudiation:
+\begin{lstlisting}[language=Erlang]
+ok = audit_client:log_critical(
+    security,
+    <<"security_admin">>,
+    cert_issuance,
+    <<"CA-Root-2026">>,
+    sign_certificate,
+    success,
+    #{<<"subject_dn">> => <<"CN=SystemAdmin">>}
+).
+\end{lstlisting}
+
+\subsection{4. Generating and Verifying Merkle Checkpoints}
+To generate a signed checkpoint for active records:
+\begin{lstlisting}[language=Erlang]
+Checkpoint = audit_core:get_checkpoint(),
+Valid = audit_checkpoint:verify(Checkpoint, PubKey),
+io:format("Checkpoint valid: ~p~n", [Valid]).
+\end{lstlisting}
+
+\subsection{5. Multi-Node CRDT Log Merging}
+Merging audit streams from independent nodes:
+\begin{lstlisting}[language=Erlang]
+% Node A log set
+SetA = audit_merge:add_node_log(audit_merge:new_log_set(), CheckpointA, RecordsA),
+% Node B log set
+SetB = audit_merge:add_node_log(audit_merge:new_log_set(), CheckpointB, RecordsB),
+
+% Conflict-free merge
+MergedSet = audit_merge:merge(SetA, SetB),
+
+% Verify full merged G-Set
+true = audit_merge:verify_merged(MergedSet, PubKey),
+
+% Linearize into total order
+LinearRecords = audit_merge:linearize(MergedSet).
+\end{lstlisting}
+
+\subsection{6. Pure Offline Verification (\texttt{audit\_verify})}
+Perform independent offline verification of a record chain:
+\begin{lstlisting}[language=Erlang]
+GenesisHash = audit_chain:genesis_hash(<<"DC1-Node01">>, BootTime),
+case audit_verify:verify_chain(Records, GenesisHash, MacKey, PubKey) of
+    ok -> io:format("Chain integrity verified.~n");
+    {error, {tampered_record, Index, BadRecord}} ->
+        io:format("Tampering detected at record ~p!~n", [Index])
+end.
+\end{lstlisting}
+
+\subsection{7. SIEM \& OSCAL Export (\texttt{audit\_export})}
+Exporting log entries for Wazuh / Syslog or compliance evidence:
+\begin{lstlisting}[language=Erlang]
+% Export to Syslog / Wazuh CEF line format
+CEFString = audit_export:to_siem(Record),
+
+% Export to JSON
+JSONData = audit_export:to_json(Records),
+
+% Export to OSCAL Evidence Map
+OscalMap = audit_export:to_oscal(Checkpoint, Records).
+\end{lstlisting}
+
+\section{Conclusion}
+The \texttt{synrc/audit} library provides a minimal, self-contained, and cryptographically verifiable audit infrastructure for ERP.1 systems. By combining standard NIST algorithms, Erlang/OTP supervision, three-plane capability separation, and CRDT Merkle merging, it fulfills the full spectrum of NIST SP 800-53 Rev. 5 AU requirements without external dependencies.
+
+\end{document}
