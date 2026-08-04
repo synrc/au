@@ -601,10 +601,10 @@ We analyze \texttt{synrc/au} against modern, standalone, minimal-dependency audi
 \textbf{System} & \textbf{Language / TCB} & \textbf{Dependency Model} & \textbf{Isolation Architecture} & \textbf{Cryptographic Security} & \textbf{Replication / Merging} \\
 \midrule
 \textbf{\texttt{synrc/au}} & Erlang/OTP & OTP \texttt{crypto} & Process boundary ([S],[C],[A]) & SHA-384 Chain + ECDSA P-384 + AES-256-GCM AEAD & \textbf{Add-only Merkle-CRDT G-Set} \\
-\textbf{Linux \texttt{kauditd}} & C99 Kernel & POSIX Kernel & Ring 0 Kernel vs Ring 3 Userspace & Plaintext sequential logs (Requires external syslog) & Manual syslog forwarder \\
-\textbf{\texttt{transparency.dev}} & Go (Tessera) & Go stdlib & Process boundary & Tile Merkle Tree + Witness Signatures & Static HTTP tiles / Checkpoint witnesses \\
+\textbf{\texttt{kauditd}} & Linux Kernel & POSIX Kernel & Ring 0 Kernel vs Ring 3 Userspace & Plaintext sequential logs (Requires external syslog) & Manual syslog forwarder \\
+\textbf{\texttt{transparency.dev}} & Go & Tessera & Process boundary & Tile Merkle Tree + Witness Signatures & Static HTTP tiles / Checkpoint witnesses \\
+\textbf{\texttt{sigstore.dev}} & Go & Trillian & Container / Microservice & Merkle Transparency Tree + Rekor Sigstore & DB-backed consensus \\
 \textbf{\texttt{CT-Go}} & Go & Go stdlib & Process boundary & RFC 6962 Merkle Tree + Ed25519 & Centralized log server \\
-\textbf{\texttt{Rekor}} & Go & Trillian, gRPC & Container / Microservice & Merkle Transparency Tree + Rekor Sig & DB-backed consensus \\
 \textbf{\texttt{tpm2-tss-audit}} & C99, \texttt{libcrypto}, TPM2 & Hardware TPM2 Enclave & TPM2 HMAC / PCR event log signatures & Single node hardware log \\
 \textbf{\texttt{sunlight}} & Rust \texttt{std}, \texttt{ring} & Memory-safe process & RFC 6962 Merkle Tree + Ed25519 & Static tile log storage \\
 \bottomrule
