@@ -1,6 +1,6 @@
 {application, au,
  [{description, "ERP.1 Audit Library for NIST 53 Attestation"},
-  {vsn, "0.7.3"},
+  {vsn, "0.7.4"},
   {registered, [audit_sup, audit_core]},
   {mod, {audit_app, []}},
   {applications, [kernel, stdlib, crypto]},
