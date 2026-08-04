@@ -13,7 +13,6 @@
     stringstyle=\color{red},
     basicstyle=\ttfamily\scriptsize,
     breakatwhitespace=false,
-    breaklines=true,
     keepspaces=true,
     captionpos=b,
     showspaces=false,
@@ -22,8 +21,8 @@
     tabsize=2
 }
 
-\title{\textbf{ERP.1 Audit \& Accountability Infrastructure:}\\Formal Taxonomy, Multi-Plane Cryptographic Logs, and NIST SP 800-53 Attestation}
-\author{\textbf{SYNRC Research Group} \\ \texttt{https://synrc.com}}
+\title{\textbf{Audit Accountability Infrastructure:}\\Formal Taxonomy, Multi-Plane Cryptographic Logs, and NIST SP 800-53 Attestation}
+\author{\textbf{Synrc Research Center} \\ \texttt{https://synrc.com}}
 \date{\today}
 
 \begin{document}
@@ -31,22 +30,36 @@
 \maketitle
 
 \begin{abstract}
-This document presents the formal specification, architecture, and theoretical foundation of the \texttt{synrc/audit} library for high-assurance operating environments based on the ERP.1 three-plane architecture. Built upon standard Erlang/OTP primitives and standard NIST cryptography (ECDSA P-384, SHA-384, HMAC-SHA-512), \texttt{synrc/audit} enforces strict privilege segregation, fail-secure append-only event logging, deterministic CRDT Merkle-log merging across multi-DC deployments, cold-storage log archiving, and complete compliance with NIST SP 800-53 Rev. 5 Audit and Accountability (AU) controls.
+This document presents the formal specification, architecture, and theoretical foundation of the \texttt{synrc/au}
+library for high-assurance operating environments based on the ERP.1 three-plane architecture. Built upon standard
+Erlang/OTP primitives and standard NIST cryptography (ECDSA P-384, SHA-384, HMAC-SHA-512), \texttt{synrc/au}
+enforces strict privilege segregation, fail-secure append-only event logging, deterministic CRDT Merkle-log
+merging across multi-DC deployments, cold-storage log archiving, and complete compliance with
+NIST SP 800-53 Rev. 5 Audit and Accountability (AU) controls.
 \end{abstract}
 
 \newpage
 \tableofcontents
+
 \newpage
-
 \section{Introduction \& Motivation}
-High-integrity critical systems (defense appliances, state registries, electronic healthcare, infrastructure control systems) demand rigorous mathematical assurance, non-repudiation, and architectural privilege isolation. Traditional POSIX models featuring monolithic \texttt{root} processes violate Zero Trust Architecture principles by exposing broad ambient authority.
 
-The ERP.1 architecture reduces the Trusted Computing Base (TCB) to a minimal cryptographic core running on Erlang/OTP on UKI Alpine Linux. The \texttt{synrc/audit} library isolates audit generation, aggregation, and signature capabilities across three execution planes, guaranteeing that audit logs remain immutable, cryptographically verifiable, and fail-secure under all operating conditions.
+High-integrity critical systems (defense appliances, state registries, electronic healthcare,
+infrastructure control systems) demand rigorous mathematical assurance, non-repudiation, and
+architectural privilege isolation. Traditional POSIX models featuring monolithic \texttt{root}
+processes violate Zero Trust Architecture principles by exposing broad ambient authority.
+
+The ERP.1 architecture reduces the Trusted Computing Base (TCB) to a minimal cryptographic core
+running on Erlang/OTP on UKI Alpine Linux. The \texttt{synrc/au} library isolates audit generation,
+aggregation, and signature capabilities across three execution planes, guaranteeing that audit
+logs remain immutable, cryptographically verifiable, and fail-secure under all operating conditions.
 
 \section{Audit and Accountability}
 
 \subsection{ERP.1 Three-Plane Isolation Model}
-Following the fundamental OS.1 taxonomy defined in \texttt{synrc/os/os.txt}, the execution environment is partitioned into three distinct planes:
+
+Following the fundamental OS.1 taxonomy defined in \texttt{synrc/os/os.txt},
+the execution environment is partitioned into three distinct planes:
 
 \begin{figure}[h!]
 \centering
@@ -163,9 +176,9 @@ Key Generation & ECDH P-384 & NIST SP 800-56A \\
 \begin{table}[h!]
 \centering
 \small
-\begin{tabular}{lp{6cm}c p{5cm}}
+\begin{tabular}{lp{5cm}c p{7cm}}
 \toprule
-\textbf{Control} & \textbf{Control Name} & \textbf{Plane} & \textbf{Implementation in \texttt{synrc/audit}} \\
+\textbf{Control} & \textbf{Description} & \textbf{Plane} & \textbf{Implementation in \texttt{synrc/audit}} \\
 \midrule
 AU-1 & Audit Policy and Procedures & [C] & Defined in CMDB metadata. \\
 AU-2 & Event Selection & [C],[A] & Configurable event masks per plane. \\
@@ -457,6 +470,13 @@ OTP application lifecycle and supervisor specification.
 \end{itemize}
 
 \section{Conclusion}
-The \texttt{synrc/audit} library provides a minimal, self-contained, and cryptographically verifiable audit infrastructure for ERP.1 systems. By combining standard NIST algorithms, Erlang/OTP supervision, three-plane capability separation, CRDT Merkle log merging, cold storage log archiving, and comprehensive export capabilities, it fulfills the full spectrum of NIST SP 800-53 Rev. 5 AU requirements without external dependencies.
+
+I dedicate this work to my daugther Michelle.
+
+The \texttt{synrc/audit} library provides a minimal, self-contained, and cryptographically
+verifiable audit infrastructure for ERP.1 systems. By combining standard NIST algorithms,
+Erlang/OTP supervision, three-plane capability separation, CRDT Merkle log merging,
+cold storage log archiving, and comprehensive export capabilities, it fulfills the full
+spectrum of NIST SP 800-53 Rev. 5 AU requirements without external dependencies.
 
 \end{document}
