@@ -10,16 +10,16 @@ requirements for High-Impact and FedRAMP High baseline security controls.
 
 ## Target Security Profile & Control Mapping
 
-| Control ID | Control Title | Implementation & Architectural Assurance | Fulfillment Status |
+| Control ID | Control Title | Implementation & Architectural Assurance |
 | :--- | :--- | :--- | :--- |
-| **AU-9** | Protection of Audit Information | Audit trail immutability via cryptographic append-only SHA-384 hash chain (`audit_chain`). Protection against unauthenticated access, truncation, or history rewrite. | **100% Implemented & Tested** |
-| **AU-9(3)** | Cryptographic Protection | Payload encryption at rest using AES-256-GCM (`audit_crypto:encrypt/3`). Offline archive segment encryption with AEAD tag authentication (`audit_archive`). | **100% Implemented & Tested** |
-| **AU-10** | Non-Repudiation | Digital signatures on critical security events using ECDSA P-384 with SHA-384 (`audit_chain:append_critical_record/4`). Signed checkpoint roots (`audit_checkpoint`). RFC 3161 timestamping. | **100% Implemented & Tested** |
-| **SC-28** | Protection of Information at Rest | Symmetric encryption of audit metadata payloads (`audit_record:encrypt_payload/2`) and archived log segments (`audit_archive:serialize_archive/3`) using FIPS-compliant AES-256-GCM. | **100% Implemented & Tested** |
-| **SC-8** | Transmission Confidentiality and Integrity | Stream encryption (`audit_export:secure_stream/2`) and HMAC-SHA-512 record transmission protection (`audit_export:export_stream/2`) for remote log aggregation over untrusted networks. | **100% Implemented & Tested** |
-| **AU-3** | Content of Audit Records | Mandatory canonical record payload containing `Id`, `Timestamp` (UTC ms), `Plane` (security/system/application), `Subject`, `Event`, `Resource`, `Action`, `Outcome`, and `Metadata` (`audit_record`). | **100% Implemented & Tested** |
-| **AU-6** | Audit Record Review, Analysis, and Reporting | CRDT G-Set multi-node log set merging (`audit_merge:merge/2`), deterministic total-order linearization (`audit_merge:linearize/2`), and cluster-wide Merkle root verification (`audit_merge:global_merkle_root/1`). | **100% Implemented & Tested** |
-| **AU-12** | Audit Record Generation | System and API entry points (`audit_client`, `audit_core`) allowing centralized generation of audit records across application, system, and security planes. | **100% Implemented & Tested** |
+| **AU-9** | Protection of Audit Information | Audit trail immutability via cryptographic append-only SHA-384 hash chain (`audit_chain`). Protection against unauthenticated access, truncation, or history rewrite. |
+| **AU-9(3)** | Cryptographic Protection | Payload encryption at rest using AES-256-GCM (`audit_crypto:encrypt/3`). Offline archive segment encryption with AEAD tag authentication (`audit_archive`). |
+| **AU-10** | Non-Repudiation | Digital signatures on critical security events using ECDSA P-384 with SHA-384 (`audit_chain:append_critical_record/4`). Signed checkpoint roots (`audit_checkpoint`). RFC 3161 timestamping. |
+| **SC-28** | Protection of Information at Rest | Symmetric encryption of audit metadata payloads (`audit_record:encrypt_payload/2`) and archived log segments (`audit_archive:serialize_archive/3`) using FIPS-compliant AES-256-GCM. |
+| **SC-8** | Transmission Confidentiality and Integrity | Stream encryption (`audit_export:secure_stream/2`) and HMAC-SHA-512 record transmission protection (`audit_export:export_stream/2`) for remote log aggregation over untrusted networks. |
+| **AU-3** | Content of Audit Records | Mandatory canonical record payload containing `Id`, `Timestamp` (UTC ms), `Plane` (security/system/application), `Subject`, `Event`, `Resource`, `Action`, `Outcome`, and `Metadata` (`audit_record`). |
+| **AU-6** | Audit Record Review, Analysis, and Reporting | CRDT G-Set multi-node log set merging (`audit_merge:merge/2`), deterministic total-order linearization (`audit_merge:linearize/2`), and cluster-wide Merkle root verification (`audit_merge:global_merkle_root/1`). |
+| **AU-12** | Audit Record Generation | System and API entry points (`audit_client`, `audit_core`) allowing centralized generation of audit records across application, system, and security planes. |
 
 ## Detailed Control Implementations
 
