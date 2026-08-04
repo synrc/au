@@ -7,6 +7,42 @@
 %% API Functions
 %% ===================================================================
 
+%% @doc Returns the list of standard formalized audit event atoms.
+-spec allowed_events() -> [audit_event()].
+allowed_events() ->
+    [
+        %% Security Plane Events
+        auth_login, auth_logout, auth_failure,
+        cert_issue, cert_revoke, key_gen, key_rotate, key_unseal,
+        policy_change, privilege_escalation,
+        %% System Plane Events
+        sys_boot, sys_shutdown, process_spawn, process_exit,
+        fs_mount, device_grant, net_bind, config_update,
+        %% Application Plane Events
+        user_action, data_access, data_mutation,
+        session_start, session_stop, api_call
+    ].
+
+%% @doc Returns the list of standard formalized audit action atoms.
+-spec allowed_actions() -> [audit_action()].
+allowed_actions() ->
+    [
+        create, read, update, delete, execute,
+        authenticate, authorize, grant, revoke,
+        sign, verify, encrypt, decrypt, unseal, rotate,
+        mount, unmount, start, stop
+    ].
+
+%% @doc Checks if given atom is a formalized standard audit event.
+-spec is_allowed_event(atom()) -> boolean().
+is_allowed_event(Event) when is_atom(Event) ->
+    lists:member(Event, allowed_events()).
+
+%% @doc Checks if given atom is a formalized standard audit action.
+-spec is_allowed_action(atom()) -> boolean().
+is_allowed_action(Action) when is_atom(Action) ->
+    lists:member(Action, allowed_actions()).
+
 %% @doc Generates a unique monotonic record ID.
 -spec new_id() -> binary().
 new_id() ->
@@ -23,9 +59,9 @@ now_ms() ->
 -spec new(Plane, Subject, Event, Resource, Action, Outcome, Meta) -> #audit_record{} when
     Plane :: security | system | application,
     Subject :: binary(),
-    Event :: atom(),
+    Event :: audit_event(),
     Resource :: binary(),
-    Action :: atom(),
+    Action :: audit_action(),
     Outcome :: success | failure,
     Meta :: map().
 new(Plane, Subject, Event, Resource, Action, Outcome, Meta) ->

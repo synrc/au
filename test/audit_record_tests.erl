@@ -9,6 +9,23 @@ new_record_validation_test() ->
     ?assertEqual(cert_issue, R#audit_record.event),
     ?assertEqual(ok, audit_record:validate(R)).
 
+formalized_taxonomy_test() ->
+    Events = audit_record:allowed_events(),
+    Actions = audit_record:allowed_actions(),
+    ?assert(is_list(Events)),
+    ?assert(is_list(Actions)),
+    ?assert(lists:member(auth_login, Events)),
+    ?assert(lists:member(cert_issue, Events)),
+    ?assert(lists:member(sys_boot, Events)),
+    ?assert(lists:member(user_action, Events)),
+    ?assert(lists:member(create, Actions)),
+    ?assert(lists:member(sign, Actions)),
+    ?assert(lists:member(authenticate, Actions)),
+    ?assert(audit_record:is_allowed_event(cert_issue)),
+    ?assert(audit_record:is_allowed_action(create)),
+    ?assertNot(audit_record:is_allowed_event(unregistered_event_xyz)),
+    ?assertNot(audit_record:is_allowed_action(unregistered_action_xyz)).
+
 invalid_record_plane_test() ->
     ?assertError({invalid_audit_record, invalid_plane},
                  audit_record:new(invalid_plane, <<"u">>, ev, <<"r">>, act, success, #{})).

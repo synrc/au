@@ -21,7 +21,7 @@
     tabsize=2
 }
 
-\title{\textbf{Audit Accountability Infrastructure:}\\Formal Taxonomy, Multi-Plane Cryptographic Logs, and NIST SP 800-53 Attestation}
+\title{\textbf{Audit Accountable Infrastructure:}\\Formal Taxonomy, Multi-Plane Cryptographic Logs, and NIST SP 800-53 Attestation}
 \author{\textbf{Synrc Research Center} \\ \texttt{https://synrc.com}}
 \date{\today}
 
@@ -111,14 +111,26 @@ Audit processing in ERP.1 satisfies four fundamental invariants:
 \subsubsection{Data Models (\texttt{\#audit\_record\{\}} and \texttt{\#audit\_checkpoint\{\}})}
 Every audit event follows the mandatory schema specified by NIST AU-3:
 \begin{lstlisting}[language=Erlang]
+-type audit_event() ::
+    auth_login | auth_logout | auth_failure | cert_issue | cert_revoke |
+    key_gen | key_rotate | key_unseal | policy_change | privilege_escalation |
+    sys_boot | sys_shutdown | process_spawn | process_exit | fs_mount |
+    device_grant | net_bind | config_update | user_action | data_access |
+    data_mutation | session_start | session_stop | api_call | atom().
+
+-type audit_action() ::
+    create | read | update | delete | execute | authenticate | authorize |
+    grant | revoke | sign | verify | encrypt | decrypt | unseal | rotate |
+    mount | unmount | start | stop | atom().
+
 -record(audit_record, {
     id        :: binary(),             % Monotonic ID (64-bit TS + Rand)
     ts        :: integer(),            % Milliseconds UTC / HLC
     plane     :: security | system | application,
     subject   :: binary(),             % Subject identity
-    event     :: atom(),               % Event type
+    event     :: audit_event(),        % Formalized event atom
     resource  :: binary(),             % Resource identifier
-    action    :: atom(),               % Action performed
+    action    :: audit_action(),       % Formalized action atom
     outcome   :: success | failure,    % Result
     meta = #{}:: map(),                % Metadata context
     prev_hash :: binary(),             % SHA-384 of previous link
@@ -142,6 +154,85 @@ Periodic Merkle checkpoints and log segment seals utilize the \texttt{\#audit\_c
 }).
 \end{lstlisting}
 
+\subsection{Formal Event and Action Taxonomy}
+
+To prevent field ambiguity, support deterministic SIEM log processing, and satisfy NIST AU-2 (Event Selection) and AU-3 (Content of Audit Records), \texttt{synrc/au} formalizes the allowed atom sets for the \texttt{event} and \texttt{action} fields of \texttt{\#audit\_record\{\}}.
+
+\subsubsection{Formalized Audit Events (\texttt{audit\_event()})}
+Audit events represent functional domain categories partitioned by execution plane:
+
+\begin{table}[ht!]
+\centering
+\small
+\begin{tabular}{llp{7cm}}
+\toprule
+\textbf{Plane} & \textbf{Event Atom} & \textbf{Semantics \& Triggering Context} \\
+\midrule
+\textbf{Security} & \texttt{auth\_login} & User or service principal authentication attempt \\
+ & \texttt{auth\_logout} & Session termination or revocation \\
+ & \texttt{auth\_failure} & Authentication rejection or credential failure \\
+ & \texttt{cert\_issue} & X.509 / TLS Certificate issuance by Security CA \\
+ & \texttt{cert\_revoke} & Certificate revocation or CRL update \\
+ & \texttt{key\_gen} & Cryptographic keypair generation (ECDSA / AES) \\
+ & \texttt{key\_rotate} & Key lifecycle rotation or re-keying operation \\
+ & \texttt{key\_unseal} & Master key unsealing or vault hardware access \\
+ & \texttt{policy\_change} & ABAC / RBAC security policy modification \\
+ & \texttt{privilege\_escalation} & Elevating capability or ambient authority \\
+\midrule
+\textbf{System} & \texttt{sys\_boot} & Operating system or kernel initialization \\
+ & \texttt{sys\_shutdown} & System shutdown, reboot, or emergency halt \\
+ & \texttt{process\_spawn} & BEAM process or container execution spawn \\
+ & \texttt{process\_exit} & Process termination or abnormal crash \\
+ & \texttt{fs\_mount} & Storage volume / Landlock directory mount \\
+ & \texttt{device\_grant} & Hardware seat or device capability assignment \\
+ & \texttt{net\_bind} & Network socket bind or outbound connection \\
+ & \texttt{config\_update} & Kernel parameter or system config update \\
+\midrule
+\textbf{Application} & \texttt{user\_action} & User interface or workflow activity \\
+ & \texttt{data\_access} & Database read or query operation \\
+ & \texttt{data\_mutation} & Record insertion, update, or deletion \\
+ & \texttt{session\_start} & Application domain session initialization \\
+ & \texttt{session\_stop} & Application domain session destruction \\
+ & \texttt{api\_call} & Service API invocation or RPC message \\
+\bottomrule
+\end{tabular}
+\caption{Formal Taxonomy of Allowed Audit Event Atoms.}
+\end{table}
+
+\subsubsection{Formalized Audit Actions (\texttt{audit\_action()})}
+Audit actions specify the discrete operational action executed on a targeted resource:
+
+\begin{table}[h!]
+\centering
+\small
+\begin{tabular}{lp{10cm}}
+\toprule
+\textbf{Action Atom} & \textbf{Operational Semantics} \\
+\midrule
+\texttt{create} & Instantiation of a new record, entity, or resource \\
+\texttt{read} & Accessing, inspecting, or querying resource content \\
+\texttt{update} & Modifying or mutating existing resource state \\
+\texttt{delete} & Removing, purging, or soft-deleting a resource \\
+\texttt{execute} & Launching or invoking an executable, task, or process \\
+\texttt{authenticate} & Verifying identity credentials \\
+\texttt{authorize} & Evaluating access control capabilities or permissions \\
+\texttt{grant} & Bestowing privileges, roles, or capability tokens \\
+\texttt{revoke} & Rescinding privileges, roles, or capability tokens \\
+\texttt{sign} & Calculating cryptographic digital signatures \\
+\texttt{verify} & Validating signatures, Merkle proofs, or hashes \\
+\texttt{encrypt} & Encrypting data at rest or in transit \\
+\texttt{decrypt} & Decrypting encrypted payloads \\
+\texttt{unseal} & Accessing sealed cryptographic keys or vaults \\
+\texttt{rotate} & Replacing cryptographic keys or certificates \\
+\texttt{mount} & Mounting filesystems or capability trees \\
+\texttt{unmount} & Unmounting filesystems or capability trees \\
+\texttt{start} & Launching a service, node, or application process \\
+\texttt{stop} & Terminating a service, node, or application process \\
+\bottomrule
+\end{tabular}
+\caption{Formal Taxonomy of Allowed Audit Action Atoms.}
+\end{table}
+
 \subsubsection{Multi-Node CRDT Log Merge}
 In multi-node / multi-DC environments, each node maintains a local sequential hash chain. Global consensus is achieved using an \textbf{Add-only Merkle-CRDT} (G-Set of signed checkpoints):
 \begin{equation}
@@ -153,6 +244,7 @@ Merging two node logs $L_A$ and $L_B$ is deterministic and conflict-free:
 \end{equation}
 Linearization sorts records by the tuple $(TS, \text{NodeId}, \text{RecordId})$, producing a deterministic global sequence without altering original node hash chains.
 
+\newpage
 \subsection{NIST Cryptographic Profile}
 All cryptographic primitives are standard FIPS/NIST compliant:
 \begin{table}[h!]
@@ -173,7 +265,7 @@ Key Generation & ECDH P-384 & NIST SP 800-56A \\
 
 \subsection{NIST SP 800-53 Rev. 5 AU Control Attestation}
 
-\begin{table}[h!]
+\begin{table}[t!]
 \centering
 \small
 \begin{tabular}{lp{5cm}c p{7cm}}
@@ -225,15 +317,16 @@ ok = audit_client:log(
      #{<<"ip">> => <<"192.168.1.100">>, <<"seat">> => <<"seat0">>}).
 \end{lstlisting}
 
+\newpage
 \subsubsection{3. Logging Critical Security Events with ECDSA Signatures}
 For high-assurance operations requiring non-repudiation (AU-10):
 \begin{lstlisting}[language=Erlang]
 ok = audit_client:log_critical(
      security,
      <<"security_admin">>,
-     cert_issuance,
+     cert_issue,
      <<"CA-Root-2026">>,
-     sign_certificate,
+     sign,
      success,
      #{<<"subject_dn">> => <<"CN=SystemAdmin">>}).
 \end{lstlisting}
@@ -333,6 +426,14 @@ Constructs, validates, encodes, and formats individual NIST AU-3 audit record in
 \begin{itemize}
     \item \texttt{new(Plane, Subject, Event, Resource, Action, Outcome, Meta) -> \#audit\_record\{\}} \\
     Instantiates and validates a new \texttt{\#audit\_record\{\}} with automatic monotonic ID generation.
+    \item \texttt{allowed\_events() -> [audit\_event()]} \\
+    Returns the list of standard formalized audit event atoms.
+    \item \texttt{allowed\_actions() -> [audit\_action()]} \\
+    Returns the list of standard formalized audit action atoms.
+    \item \texttt{is\_allowed\_event(Event::atom()) -> boolean()} \\
+    Checks whether a given atom belongs to the formalized \texttt{audit\_event()} set.
+    \item \texttt{is\_allowed\_action(Action::atom()) -> boolean()} \\
+    Checks whether a given atom belongs to the formalized \texttt{audit\_action()} set.
     \item \texttt{validate(Record::term()) -> ok | \{error, term()\}} \\
     Enforces NIST AU-3 schema validation on record fields.
     \item \texttt{canonical\_payload(\#audit\_record\{\}) -> binary()} \\

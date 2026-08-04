@@ -1,14 +1,34 @@
 -ifndef(AUDIT_HRL).
 -define(AUDIT_HRL, true).
 
+-type audit_event() ::
+    %% Security Plane Events
+    auth_login | auth_logout | auth_failure |
+    cert_issue | cert_revoke | key_gen | key_rotate | key_unseal |
+    policy_change | privilege_escalation |
+    %% System Plane Events
+    sys_boot | sys_shutdown | process_spawn | process_exit |
+    fs_mount | device_grant | net_bind | config_update |
+    %% Application Plane Events
+    user_action | data_access | data_mutation |
+    session_start | session_stop | api_call |
+    atom().
+
+-type audit_action() ::
+    create | read | update | delete | execute |
+    authenticate | authorize | grant | revoke |
+    sign | verify | encrypt | decrypt | unseal | rotate |
+    mount | unmount | start | stop |
+    atom().
+
 -record(audit_record, {
     id          :: binary(),
     ts          :: integer(),
     plane       :: security | system | application,
     subject     :: binary(),
-    event       :: atom(),
+    event       :: audit_event(),
     resource    :: binary(),
-    action      :: atom(),
+    action      :: audit_action(),
     outcome     :: success | failure,
     meta = #{}  :: map(),
     prev_hash   :: binary(),
