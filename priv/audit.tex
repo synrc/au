@@ -61,7 +61,7 @@ logs remain immutable, cryptographically verifiable, and fail-secure under all o
 Following the fundamental OS.1 taxonomy defined in \texttt{synrc/os/os.txt},
 the execution environment is partitioned into three distinct planes:
 
-\begin{figure}[h!]
+\begin{figure}[ht!]
 \centering
 \begin{lstlisting}
 +-----------------------------------------------------------------------------+
@@ -164,6 +164,7 @@ Audit events represent functional domain categories partitioned by execution pla
 \begin{table}[ht!]
 \centering
 \small
+\noindent\makebox[\textwidth][c]{
 \begin{tabular}{llp{7cm}}
 \toprule
 \textbf{Plane} & \textbf{Event Atom} & \textbf{Semantics \& Triggering Context} \\
@@ -196,15 +197,17 @@ Audit events represent functional domain categories partitioned by execution pla
  & \texttt{api\_call} & Service API invocation or RPC message \\
 \bottomrule
 \end{tabular}
+}
 \caption{Formal Taxonomy of Allowed Audit Event Atoms.}
 \end{table}
 
 \subsubsection{Formalized Audit Actions (\texttt{audit\_action()})}
 Audit actions specify the discrete operational action executed on a targeted resource:
 
-\begin{table}[h!]
+\begin{table}[ht!]
 \centering
 \small
+\noindent\makebox[\textwidth][c]{
 \begin{tabular}{lp{10cm}}
 \toprule
 \textbf{Action Atom} & \textbf{Operational Semantics} \\
@@ -230,6 +233,7 @@ Audit actions specify the discrete operational action executed on a targeted res
 \texttt{stop} & Terminating a service, node, or application process \\
 \bottomrule
 \end{tabular}
+}
 \caption{Formal Taxonomy of Allowed Audit Action Atoms.}
 \end{table}
 
@@ -247,7 +251,7 @@ Linearization sorts records by the tuple $(TS, \text{NodeId}, \text{RecordId})$,
 \newpage
 \subsection{NIST Cryptographic Profile}
 All cryptographic primitives are standard FIPS/NIST compliant:
-\begin{table}[h!]
+\begin{table}[ht!]
 \centering
 \begin{tabular}{llll}
 \toprule
@@ -268,6 +272,7 @@ Key Generation & ECDH P-384 & NIST SP 800-56A \\
 \begin{table}[t!]
 \centering
 \small
+\noindent\makebox[\textwidth][c]{
 \begin{tabular}{lp{5cm}c p{7cm}}
 \toprule
 \textbf{Control} & \textbf{Description} & \textbf{Plane} & \textbf{Implementation in \texttt{synrc/audit}} \\
@@ -286,6 +291,7 @@ AU-11 & Audit Record Retention & [C] & Archiving tool (\texttt{audit\_archive}) 
 AU-12 & Audit Generation & [A],[C] & Real-time generation via capability bridge. \\
 \bottomrule
 \end{tabular}
+}
 \caption{NIST SP 800-53 Rev. 5 AU Controls Attestation Matrix.}
 \end{table}
 
@@ -570,6 +576,50 @@ OTP application lifecycle and supervisor specification.
     OTP supervisor callback specifying child worker parameters.
 \end{itemize}
 
+\section{Related Work, Historical Lineage, and Ecosystem Comparison}
+
+\subsection{Historical Lineage}
+Cryptographic audit logging and tamper-evident event recording rest upon foundational work across distributed security literature:
+\begin{enumerate}
+    \item \textbf{Schneier \& Kelsey Forward-Secure Logging (1998, 1999)}~\cite{schneier1998,schneier1999}: Schneier and Kelsey established the core model for secure audit logs on untrusted machines using evolving hash chains ($H_i = \text{SHA}(H_{i-1} \parallel W_i)$) and forward-secure symmetric MAC keys deleted after writing. \texttt{synrc/au} builds upon this linear chain model, extending it to a multi-plane Erlang execution architecture where key generation and signature authorization reside strictly inside the isolated Security Admin BEAM [S].
+    \item \textbf{Merkle Trees \& Audit Proofs (Merkle 1987, Crosby \& Wallach 2009)}~\cite{merkle1987,crosby2009}: Merkle's 1987 binary tree structures and Crosby \& Wallach's efficient data structures for tamper-evident logging established logarithmic $\mathcal{O}(\log N)$ inclusion verification and consistency proofs. \texttt{synrc/au} utilizes SHA-384 Merkle trees inside \texttt{audit\_checkpoint} and for multi-DC global cluster root generation (\texttt{global\_merkle\_root/1}).
+    \item \textbf{Certificate Transparency \& RFC 6962 (Laurie et al., 2013)}~\cite{rfc6962}: Established publicly auditable append-only Merkle tree logs for public TLS certificate issuance. \texttt{synrc/au} incorporates append-only Merkle tree semantics while providing native AEAD AES-256-GCM encryption at rest (SC-28) for enterprise confidentiality.
+    \item \textbf{Google Transparency Dev Initiative}~\cite{transparencydev}: Modern zero-dependency Go ecosystem (\url{https://transparency.dev}) provides modular, tile-based Merkle tree storage (\texttt{tessera}) and witness verification networks for application transparency. \texttt{synrc/au} shares this zero-dependency philosophy, implementing native Erlang/OTP cryptographic log storage and verification.
+    \item \textbf{NIST SP 800-53 Rev. 5 Standards (2020)}~\cite{nist80053}: Outlines mandatory security controls for US Federal and FedRAMP High baseline environments.
+\end{enumerate}
+
+\subsection{Modern Zero-Dependency Competitor Analysis Across Languages}
+
+We analyze \texttt{synrc/au} against modern, standalone, minimal-dependency audit and transparency logging implementations in Go, C99, and Rust:
+
+\begin{table}[ht!]
+\centering
+\scriptsize
+\noindent\makebox[\textwidth][c]{
+\begin{tabular}{lp{1.8cm}p{1.8cm}p{1.8cm}p{2.2cm}p{4.5cm}}
+\toprule
+\textbf{System} & \textbf{Language / TCB} & \textbf{Dependency Model} & \textbf{Isolation Architecture} & \textbf{Cryptographic Security} & \textbf{Replication / Merging} \\
+\midrule
+\textbf{\texttt{synrc/au}} & Erlang/OTP & OTP \texttt{crypto} & Process boundary ([S],[C],[A]) & SHA-384 Chain + ECDSA P-384 + AES-256-GCM AEAD & \textbf{Add-only Merkle-CRDT G-Set} \\
+\textbf{Linux \texttt{kauditd}} & C99 Kernel & POSIX Kernel & Ring 0 Kernel vs Ring 3 Userspace & Plaintext sequential logs (Requires external syslog) & Manual syslog forwarder \\
+\textbf{\texttt{transparency.dev}} & Go (Tessera) & Go stdlib & Process boundary & Tile Merkle Tree + Witness Signatures & Static HTTP tiles / Checkpoint witnesses \\
+\textbf{\texttt{CT-Go}} & Go & Go stdlib & Process boundary & RFC 6962 Merkle Tree + Ed25519 & Centralized log server \\
+\textbf{\texttt{Rekor}} & Go & Trillian, gRPC & Container / Microservice & Merkle Transparency Tree + Rekor Sig & DB-backed consensus \\
+\textbf{\texttt{tpm2-tss-audit}} & C99, \texttt{libcrypto}, TPM2 & Hardware TPM2 Enclave & TPM2 HMAC / PCR event log signatures & Single node hardware log \\
+\textbf{\texttt{sunlight}} & Rust \texttt{std}, \texttt{ring} & Memory-safe process & RFC 6962 Merkle Tree + Ed25519 & Static tile log storage \\
+\bottomrule
+\end{tabular}
+}
+\caption{Cross-Language Zero-Dependency Audit System Comparison.}
+\end{table}
+
+\subsection{Key Architectural Differentiators of \texttt{synrc/au}}
+\begin{enumerate}
+    \item \textbf{Three-Plane Process Isolation}: C99 system loggers (\texttt{auditd}) rely on monolithic POSIX processes, exposing signing keys to local root compromise. \texttt{synrc/au} isolates key generation and signing inside the Security Admin BEAM [S], preventing Application [A] or Control [C] planes from accessing long-term private keys.
+    \item \textbf{Confidentiality at Rest (SC-28 / AU-9(3))}: Standard transparency loggers (Rekor, CT-Go, \texttt{transparency.dev}) are public plaintext ledgers. \texttt{synrc/au} natively encrypts payload metadata using AES-256-GCM AEAD authenticated encryption.
+    \item \textbf{Asynchronous Conflict-Free Merging}: Uses Add-only Merkle-CRDT G-Set semantics to merge logs across multi-DC deployments deterministically without centralized database locks.
+\end{enumerate}
+
 \section{Conclusion}
 
 I dedicate this work to my daugther Michelle.
@@ -579,5 +629,90 @@ verifiable audit infrastructure for ERP.1 systems. By combining standard NIST al
 Erlang/OTP supervision, three-plane capability separation, CRDT Merkle log merging,
 cold storage log archiving, and comprehensive export capabilities, it fulfills the full
 spectrum of NIST SP 800-53 Rev. 5 AU requirements without external dependencies.
+
+\newpage
+\begin{thebibliography}{99}
+
+\bibitem{schneier1998}
+B.~Schneier and J.~Kelsey,
+``Cryptographic support for secure logs on untrusted machines,''
+\emph{ACM Transactions on Information and System Security (TISSEC)}, vol.~2, no.~2, pp.~159--176, 1998.
+
+\bibitem{schneier1999}
+B.~Schneier and J.~Kelsey,
+``Secure audit logs supporting tamper detection and forward-secrecy,''
+in \emph{Proceedings of the 10th USENIX Security Symposium}, 1999, pp.~139--165.
+
+\bibitem{merkle1987}
+R.~C. Merkle,
+``A digital signature based on a conventional encryption function,''
+in \emph{Conference on the Theory and Application of Cryptographic Techniques (CRYPTO '87)}, Springer, 1987, pp.~369--378.
+
+\bibitem{crosby2009}
+S.~A. Crosby and D.~S. Wallach,
+``Efficient data structures for tamper-evident logging,''
+in \emph{Proceedings of the 18th USENIX Security Symposium}, 2009, pp.~317--334.
+
+\bibitem{rfc6962}
+B.~Laurie, A.~Langley, and E.~Kasper,
+``Certificate Transparency,''
+\emph{IETF RFC 6962}, Jun. 2013.
+
+\bibitem{transparencydev}
+Google Transparency Engineering,
+``Verifiable Data Structures and Transparency Logs,''
+\emph{Google Transparency Dev Initiative}, 2024. [Online]. Available: \url{https://transparency.dev}
+
+\bibitem{rfc3161}
+C.~Adams, P.~Cain, D.~Pinkas, and R.~Zuccherato,
+``Internet X.509 Public Key Infrastructure Time-Stamp Protocol (TSP),''
+\emph{IETF RFC 3161}, Aug. 2001.
+
+\bibitem{nist80053}
+National Institute of Standards and Technology (NIST),
+``Security and Privacy Controls for Information Systems and Organizations,''
+\emph{NIST Special Publication 800-53}, Revision 5, Sep. 2020.
+
+\bibitem{fips186}
+National Institute of Standards and Technology (NIST),
+``Digital Signature Standard (DSS),''
+\emph{FIPS PUB 186-4}, Jul. 2013.
+
+\bibitem{fips180}
+National Institute of Standards and Technology (NIST),
+``Secure Hash Standard (SHS),''
+\emph{FIPS PUB 180-4}, Aug. 2015.
+
+\bibitem{fips198}
+National Institute of Standards and Technology (NIST),
+``The Keyed-Hash Message Authentication Code (HMAC),''
+\emph{FIPS PUB 198-1}, Jul. 2008.
+
+\bibitem{belllapadula}
+D.~E. Bell and L.~J. LaPadula,
+``Secure Computer System: Unified Exposition and Multics Interpretation,''
+\emph{MITRE Corp Technical Report MTR-2997}, Jul. 1975.
+
+\bibitem{shapiro2011}
+M.~Shapiro, N.~Pregui\c{c}a, C.~Baquero, and M.~Zawirski,
+``Conflict-free Replicated Data Types,''
+in \emph{Symposium on Self-Stabilizing Systems (SSS 2011)}, Springer, 2011, pp.~386--400.
+
+\bibitem{kauditd}
+Linux Audit Subsystem Project,
+``Linux Audit Framework (\texttt{kauditd} \& \texttt{auditd}),''
+\emph{Linux Kernel Documentation}, 2024. [Online]. Available: \url{https://docs.kernel.org/trace/events.html}
+
+\bibitem{rekor}
+Sigstore Community,
+``Rekor: Signature Transparency Log for Software Supply Chain Security,''
+\emph{Linux Foundation Open Source Project}, 2022. [Online]. Available: \url{https://www.sigstore.dev}
+
+\bibitem{trillian}
+Google Transparency Team,
+``Trillian: Verifiable Data Structures for Verifiable Logs,''
+\emph{GitHub Repository}, 2023. [Online]. Available: \url{https://github.com/google/trillian}
+
+\end{thebibliography}
 
 \end{document}
