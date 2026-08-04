@@ -11,15 +11,15 @@
 \lstset{
     keywordstyle=\color{blue},
     stringstyle=\color{red},
-    basicstyle=\ttfamily\footnotesize,
+    basicstyle=\ttfamily\scriptsize,
     breakatwhitespace=false,
-    breaklines=false,
+    breaklines=true,
     keepspaces=true,
     captionpos=b,
     showspaces=false,
     showstringspaces=false,
     showtabs=false,
-    tabsize=1
+    tabsize=2
 }
 
 \title{\textbf{ERP.1 Audit \& Accountability Infrastructure:}\\Formal Taxonomy, Multi-Plane Cryptographic Logs, and NIST SP 800-53 Attestation}
@@ -31,7 +31,7 @@
 \maketitle
 
 \begin{abstract}
-This document presents the formal specification, architecture, and theoretical foundation of the \texttt{synrc/audit} library for high-assurance operating environments based on the ERP.1 three-plane architecture. Built upon standard Erlang/OTP primitives and standard NIST cryptography (ECDSA P-384, SHA-384, HMAC-SHA-512), \texttt{synrc/audit} enforces strict privilege segregation, fail-secure append-only event logging, deterministic CRDT Merkle-log merging across multi-DC deployments, and complete compliance with NIST SP 800-53 Rev. 5 Audit and Accountability (AU) controls.
+This document presents the formal specification, architecture, and theoretical foundation of the \texttt{synrc/audit} library for high-assurance operating environments based on the ERP.1 three-plane architecture. Built upon standard Erlang/OTP primitives and standard NIST cryptography (ECDSA P-384, SHA-384, HMAC-SHA-512), \texttt{synrc/audit} enforces strict privilege segregation, fail-secure append-only event logging, deterministic CRDT Merkle-log merging across multi-DC deployments, cold-storage log archiving, and complete compliance with NIST SP 800-53 Rev. 5 Audit and Accountability (AU) controls.
 \end{abstract}
 
 \newpage
@@ -95,7 +95,7 @@ Audit processing in ERP.1 satisfies four fundamental invariants:
     \item \textbf{Completeness}: No privileged action (certificate issuance, key unsealing, ABAC policy change, device grant) can execute without a synchronous audit record commit (fail-secure, AU-5).
 \end{enumerate}
 
-\subsubsection{Record Model (\texttt{\#audit\_record\{\}})}
+\subsubsection{Data Models (\texttt{\#audit\_record\{\}} and \texttt{\#audit\_checkpoint\{\}})}
 Every audit event follows the mandatory schema specified by NIST AU-3:
 \begin{lstlisting}[language=Erlang]
 -record(audit_record, {
@@ -107,11 +107,25 @@ Every audit event follows the mandatory schema specified by NIST AU-3:
     resource  :: binary(),             % Resource identifier
     action    :: atom(),               % Action performed
     outcome   :: success | failure,    % Result
-    meta      :: map(),                % Metadata context
+    meta = #{}:: map(),                % Metadata context
     prev_hash :: binary(),             % SHA-384 of previous link
     hmac      :: binary(),             % HMAC-SHA-512 (System plane)
     sig       :: binary() | undefined, % ECDSA P-384 (Security plane)
     tsp       :: binary() | undefined  % RFC 3161 timestamp
+}).
+\end{lstlisting}
+
+Periodic Merkle checkpoints and log segment seals utilize the \texttt{\#audit\_checkpoint\{\}} record schema:
+\begin{lstlisting}[language=Erlang]
+-record(audit_checkpoint, {
+    node_id      :: binary(),          % Originating node identifier
+    from_id      :: binary(),          % First record ID in checkpoint
+    to_id        :: binary(),          % Last record ID in checkpoint
+    head_hash    :: binary(),          % Top hash of local hash chain
+    record_count :: non_neg_integer(), % Total records in segment
+    merkle_root  :: binary(),          % SHA-384 Merkle root of records
+    sig          :: binary() | undefined, % Security Admin ECDSA P-384 sig
+    tsp          :: binary() | undefined  % RFC 3161 timestamp token
 }).
 \end{lstlisting}
 
@@ -219,28 +233,44 @@ Valid      = audit_checkpoint:verify(Checkpoint, PubKey),
 io:format("Checkpoint valid: ~p~n", [Valid]).
 \end{lstlisting}
 
-\subsubsection{5. Multi-Node CRDT Log Merging}
-Merging audit streams from independent nodes:
+\subsubsection{5. Multi-Node CRDT Log Merging, Delta \& Sync}
+Merging, diffing, and linearizing audit streams from independent nodes:
 \begin{lstlisting}[language=Erlang]
 SetA          = audit_merge:add_node_log(audit_merge:new_log_set(), CheckpointA, RecordsA),
 SetB          = audit_merge:add_node_log(audit_merge:new_log_set(), CheckpointB, RecordsB),
 MergedSet     = audit_merge:merge(SetA, SetB),
 true          = audit_merge:verify_merged(MergedSet, PubKey),
-LinearRecords = audit_merge:linearize(MergedSet).
+LinearRecords = audit_merge:linearize(MergedSet, #{plane => security, limit => 50}),
+
+%% Calculate synchronization delta and missing entries diff
+DiffSet       = audit_merge:diff(SetA, SetB),
+DeltaSet      = audit_merge:delta(MergedSet, #{<<"DC1-Node01">> => 10}),
+Stats         = audit_merge:stats(MergedSet).
 \end{lstlisting}
 
 \subsubsection{6. Pure Offline Verification (\texttt{audit\_verify})}
-Perform independent offline verification of a record chain:
+Perform independent offline verification of a record chain and Merkle inclusion:
 \begin{lstlisting}[language=Erlang]
 GenesisHash = audit_chain:genesis_hash(<<"DC1-Node01">>, BootTime),
 case audit_verify:verify_chain(Records, GenesisHash, MacKey, PubKey) of
     ok -> io:format("Chain integrity verified.~n");
     {error, {tampered_record, Index, BadRecord}} ->
         io:format("Tampering detected at record ~p!~n", [Index])
-end.
+end,
+IsIncluded = audit_verify:verify_inclusion(Record, Checkpoint).
 \end{lstlisting}
 
-\subsubsection{7. SIEM \& OSCAL Export (\texttt{audit\_export})}
+\subsubsection{7. Cold Storage Log Archiving \& Sealing (\texttt{audit\_archive})}
+Splitting, sealing, and serializing log segments for long-term cold storage (AU-11):
+\begin{lstlisting}[language=Erlang]
+{Segment, Remaining} = audit_archive:cut_segment(Records, CutoffTimestamp),
+SealedCP             = audit_archive:seal_segment(Segment, <<"DC1-Node01">>, PrivKey),
+ArchiveBin           = audit_archive:serialize_archive(Segment, SealedCP),
+
+{ok, RestoredCP, RestoredRecords} = audit_archive:deserialize_archive(ArchiveBin).
+\end{lstlisting}
+
+\subsubsection{8. SIEM \& OSCAL Export (\texttt{audit\_export})}
 Exporting log entries for Wazuh / Syslog or compliance evidence:
 \begin{lstlisting}[language=Erlang]
 CEFString = audit_export:to_siem(Record),
@@ -248,7 +278,185 @@ JSONData  = audit_export:to_json(Records),
 OscalMap  = audit_export:to_oscal(Checkpoint, Records).
 \end{lstlisting}
 
+\subsection{Erlang Module API Reference}
+This section provides the complete reference specification for all exported functions across the 12 modules in \texttt{synrc/au}.
+
+\subsubsection{\texttt{audit\_client}}
+High-level Application Plane client interface for emitting audit events to \texttt{audit\_core}.
+\begin{itemize}
+    \item \texttt{log(Subject, Event, Resource, Action, Outcome, Meta) -> ok | \{error, term()\}} \\
+    Submits a standard audit event defaulting to the \texttt{application} plane.
+    \item \texttt{log(Plane, Subject, Event, Resource, Action, Outcome, Meta) -> ok | \{error, term()\}} \\
+    Submits a standard audit event targeting the specified execution plane (\texttt{security}, \texttt{system}, or \texttt{application}).
+    \item \texttt{log\_critical(Plane, Subject, Event, Resource, Action, Outcome, Meta) -> ok | \{error, term()\}} \\
+    Submits a high-assurance audit event requiring Security Admin ECDSA P-384 signature and RFC 3161 timestamping.
+\end{itemize}
+
+\subsubsection{\texttt{audit\_core}}
+OTP \texttt{gen\_server} managing local ETS storage, append-only hash chain linking, and checkpoint generation.
+\begin{itemize}
+    \item \texttt{start\_link() -> \{ok, pid()\} | \{error, term()\}} \\
+    Starts the audit core server with default node options.
+    \item \texttt{start\_link(Opts::map()) -> \{ok, pid()\} | \{error, term()\}} \\
+    Starts the audit core server with custom options (\texttt{node\_id}, \texttt{boot\_time}, \texttt{mac\_key}, \texttt{sec\_keypair}).
+    \item \texttt{stop() -> ok} \\
+    Gracefully stops the \texttt{audit\_core} server.
+    \item \texttt{log\_event(Record::\#audit\_record\{\}) -> ok | \{error, term()\}} \\
+    Synchronously appends a standard audit record to the local hash chain and ETS table.
+    \item \texttt{log\_critical\_event(Record::\#audit\_record\{\}) -> ok | \{error, term()\}} \\
+    Synchronously appends a signed critical audit record to the local hash chain and ETS table.
+    \item \texttt{get\_head\_hash() -> binary()} \\
+    Returns the current 384-bit SHA-384 head hash of the node's local audit chain.
+    \item \texttt{get\_records() -> [\#audit\_record\{\}]} \\
+    Retrieves all audit records stored in the local ETS table in chronological sequence.
+    \item \texttt{get\_checkpoint() -> \#audit\_checkpoint\{\}} \\
+    Generates a signed \texttt{\#audit\_checkpoint\{\}} spanning all currently accumulated records.
+    \item \texttt{set\_security\_keys(PubKey::binary(), PrivKey::binary()) -> ok} \\
+    Dynamically configures or updates the Security Admin ECDSA P-384 keypair.
+\end{itemize}
+
+\subsubsection{\texttt{audit\_record}}
+Constructs, validates, encodes, and formats individual NIST AU-3 audit record instances.
+\begin{itemize}
+    \item \texttt{new(Plane, Subject, Event, Resource, Action, Outcome, Meta) -> \#audit\_record\{\}} \\
+    Instantiates and validates a new \texttt{\#audit\_record\{\}} with automatic monotonic ID generation.
+    \item \texttt{validate(Record::term()) -> ok | \{error, term()\}} \\
+    Enforces NIST AU-3 schema validation on record fields.
+    \item \texttt{canonical\_payload(\#audit\_record\{\}) -> binary()} \\
+    Computes a deterministic binary payload encoding (excluding transient hashes/signatures) used for hashing and MAC generation.
+    \item \texttt{encode(\#audit\_record\{\}) -> binary()} \\
+    Encodes an audit record into a deterministic binary term format.
+    \item \texttt{decode(Bin::binary()) -> \{ok, \#audit\_record\{\}\} | \{error, term()\}} \\
+    Decodes a binary term into a validated \texttt{\#audit\_record\{\}}.
+    \item \texttt{new\_id() -> binary()} \\
+    Generates a monotonic 16-byte record identifier (64-bit UTC ms timestamp + 8-byte random entropy).
+    \item \texttt{now\_ms() -> integer()} \\
+    Returns current UTC timestamp in milliseconds.
+\end{itemize}
+
+\subsubsection{\texttt{audit\_chain}}
+Implements append-only hash chain linking, HMAC tag calculation, and link verification.
+\begin{itemize}
+    \item \texttt{genesis\_hash(NodeId::binary(), BootTime::integer()) -> binary()} \\
+    Computes the root genesis hash for a node audit chain (\texttt{ERP.1-AUDIT-ROOT:NodeId:BootTime}).
+    \item \texttt{append\_record(Record, PrevHash, MacKey) -> \#audit\_record\{\}} \\
+    Calculates \texttt{prev\_hash} via SHA-384 and \texttt{hmac} via HMAC-SHA-512 over \texttt{(PrevHash || Payload)}.
+    \item \texttt{append\_critical\_record(Record, PrevHash, MacKey, SecPrivKey) -> \#audit\_record\{\}} \\
+    Appends standard chain hashes and attaches an ECDSA P-384 signature and RFC 3161 timestamp token.
+    \item \texttt{verify\_record(Record, PrevPrevHash, MacKey, SecPubKey) -> boolean()} \\
+    Validates single record hash continuity, HMAC tag, ECDSA signature, and timestamp token.
+\end{itemize}
+
+\subsubsection{\texttt{audit\_checkpoint}}
+Constructs and verifies Merkle checkpoints over log segments.
+\begin{itemize}
+    \item \texttt{create(NodeId, Records, HeadHash, SecPrivKey) -> \#audit\_checkpoint\{\}} \\
+    Builds a \texttt{\#audit\_checkpoint\{\}}, computes the Merkle tree root over record canonical payloads, and applies an optional ECDSA signature.
+    \item \texttt{verify(Checkpoint::\#audit\_checkpoint\{\}, SecPubKey) -> boolean()} \\
+    Validates ECDSA P-384 signature and RFC 3161 timestamp token on a checkpoint.
+    \item \texttt{compute\_merkle\_root([\#audit\_record\{\}]) -> binary()} \\
+    Computes the binary Merkle root hash (SHA-384) over a list of audit records.
+\end{itemize}
+
+\subsubsection{\texttt{audit\_merge}}
+Add-only Merkle-CRDT G-Set engine for multi-node log synchronization, diffing, delta tracking, and linearization.
+\begin{itemize}
+    \item \texttt{new\_log\_set() -> log\_set()} \\
+    Returns an empty G-Set map.
+    \item \texttt{add\_node\_log(LogSet, Checkpoint, Records) -> log\_set()} \\
+    Adds or updates a node log entry in the G-Set, merging records if the node exists.
+    \item \texttt{merge(LogSetA, LogSetB) -> log\_set()} \\
+    Computes the deterministic CRDT G-Set union of two log sets.
+    \item \texttt{linearize(LogSet) -> [\#audit\_record\{\}]} \\
+    Produces a total order sequence of all records across nodes sorted by \texttt{(TS, NodeId, RecordId)}.
+    \item \texttt{linearize(LogSet, Opts::map()) -> [\#audit\_record\{\}]} \\
+    Linearizes records with filtering options (\texttt{from\_ts}, \texttt{to\_ts}, \texttt{plane}, \texttt{limit}).
+    \item \texttt{global\_merkle\_root(LogSet) -> binary()} \\
+    Computes a cluster-wide global Merkle root over sorted node head hashes.
+    \item \texttt{verify\_merged(LogSet, SecPubKey) -> boolean()} \\
+    Verifies all checkpoints and record hash chains contained within a merged log set.
+    \item \texttt{diff(LogSetA, LogSetB) -> log\_set()} \\
+    Calculates missing records present in \texttt{LogSetB} but absent in \texttt{LogSetA}.
+    \item \texttt{delta(LogSet, KnownCounts::map()) -> log\_set()} \\
+    Generates a delta log set containing only records newer than specified per-node counts.
+    \item \texttt{apply\_delta(LocalSet, DeltaSet) -> log\_set()} \\
+    Applies a delta log set into a local log set via CRDT merge.
+    \item \texttt{stats(LogSet) -> map()} \\
+    Computes aggregate cluster metrics (\texttt{node\_count}, \texttt{total\_records}, \texttt{min\_timestamp}, \texttt{max\_timestamp}, \texttt{global\_merkle\_root}).
+\end{itemize}
+
+\subsubsection{\texttt{audit\_verify}}
+Pure offline cryptographic chain and checkpoint verifier.
+\begin{itemize}
+    \item \texttt{verify\_chain(Records, GenesisHash, MacKey, SecPubKey) -> ok | \{error, \{tampered\_record, integer(), term()\}\}} \\
+    Iteratively verifies chain continuity, HMAC tags, and ECDSA signatures from genesis.
+    \item \texttt{verify\_checkpoint(Checkpoint, SecPubKey) -> boolean()} \\
+    Verifies a checkpoint's signature and timestamp offline.
+    \item \texttt{verify\_inclusion(Record, Checkpoint) -> boolean()} \\
+    Verifies whether a record payload hash is included in a checkpoint's Merkle root.
+\end{itemize}
+
+\subsubsection{\texttt{audit\_archive}}
+Cold storage segmentation, sealing, and serialization primitives.
+\begin{itemize}
+    \item \texttt{cut\_segment(Records, CutoffTS) -> \{Segment, Remaining\}} \\
+    Partitions audit records at a timestamp boundary.
+    \item \texttt{seal\_segment(Segment, NodeId, SecPrivKey) -> \#audit\_checkpoint\{\}} \\
+    Seals a record segment into a signed \texttt{\#audit\_checkpoint\{\}}.
+    \item \texttt{serialize\_archive(Segment, Checkpoint) -> binary()} \\
+    Compresses and serializes a segment and its checkpoint into binary format.
+    \item \texttt{deserialize\_archive(Bin::binary()) -> \{ok, \#audit\_checkpoint\{\}, [\#audit\_record\{\}]\} | \{error, term()\}} \\
+    Deserializes and validates an archive binary blob.
+\end{itemize}
+
+\subsubsection{\texttt{audit\_export}}
+Formats audit evidence into standard SIEM, JSON, and OSCAL representations.
+\begin{itemize}
+    \item \texttt{to\_json(RecordOrRecords) -> binary()} \\
+    Formats record(s) into structured JSON.
+    \item \texttt{to\_siem(Record) -> binary()} \\
+    Formats an audit record into Wazuh / Syslog Common Event Format (CEF).
+    \item \texttt{to\_oscal(Checkpoint, Records) -> map()} \\
+    Formats checkpoint and records into a NIST OSCAL Assessment Results structure.
+\end{itemize}
+
+\subsubsection{\texttt{audit\_crypto}}
+FIPS/NIST cryptographic primitives (ECDSA P-384, SHA-384, HMAC-SHA-512, RFC 3161 timestamps).
+\begin{itemize}
+    \item \texttt{generate\_keypair() -> \{PubKey, PrivKey\}} \\
+    Generates a fresh ECDSA P-384 (\texttt{secp384r1}) keypair.
+    \item \texttt{generate\_mac\_key() -> binary()} \\
+    Generates a 256-bit symmetric key for HMAC calculation.
+    \item \texttt{hash(Data::binary()) -> binary()} \\
+    Computes SHA-384 hash of binary data.
+    \item \texttt{hash(Algo, Data::binary()) -> binary()} \\
+    Computes specified digest (\texttt{sha384} or \texttt{sha512}).
+    \item \texttt{hmac(Key, Data) -> binary()} \\
+    Computes HMAC-SHA-512 over data using symmetric key.
+    \item \texttt{sign(PrivKey, Data) -> binary()} \\
+    Signs data digest using ECDSA P-384 with SHA-384 digest.
+    \item \texttt{verify(PubKey, Data, Signature) -> boolean()} \\
+    Verifies ECDSA P-384 signature over data.
+    \item \texttt{timestamp\_token(Digest, TS) -> binary()} \\
+    Generates a simulated RFC 3161 timestamp token for a given digest and timestamp.
+    \item \texttt{verify\_timestamp(Token, Digest, TS) -> boolean()} \\
+    Verifies an RFC 3161 timestamp token.
+\end{itemize}
+
+\subsubsection{\texttt{audit\_app} \& \texttt{audit\_sup}}
+OTP application lifecycle and supervisor specification.
+\begin{itemize}
+    \item \texttt{audit\_app:start(StartType, StartArgs) -> \{ok, pid()\} | \{error, term()\}} \\
+    Starts the \texttt{au} OTP application and supervisor tree.
+    \item \texttt{audit\_app:stop(State) -> ok} \\
+    Stops the application.
+    \item \texttt{audit\_sup:start\_link() -> \{ok, pid()\} | \{error, term()\}} \\
+    Starts the \texttt{audit\_sup} supervisor (\texttt{one\_for\_one} strategy supervising \texttt{audit\_core}).
+    \item \texttt{audit\_sup:init(Args) -> \{ok, \{SupFlags, [ChildSpec]\}\}} \\
+    OTP supervisor callback specifying child worker parameters.
+\end{itemize}
+
 \section{Conclusion}
-The \texttt{synrc/audit} library provides a minimal, self-contained, and cryptographically verifiable audit infrastructure for ERP.1 systems. By combining standard NIST algorithms, Erlang/OTP supervision, three-plane capability separation, and CRDT Merkle merging, it fulfills the full spectrum of NIST SP 800-53 Rev. 5 AU requirements without external dependencies.
+The \texttt{synrc/audit} library provides a minimal, self-contained, and cryptographically verifiable audit infrastructure for ERP.1 systems. By combining standard NIST algorithms, Erlang/OTP supervision, three-plane capability separation, CRDT Merkle log merging, cold storage log archiving, and comprehensive export capabilities, it fulfills the full spectrum of NIST SP 800-53 Rev. 5 AU requirements without external dependencies.
 
 \end{document}
