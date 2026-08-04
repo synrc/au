@@ -11,7 +11,7 @@ requirements for High-Impact and FedRAMP High baseline security controls.
 ## Target Security Profile & Control Mapping
 
 | Control ID | Control Title | Implementation & Architectural Assurance |
-| :--- | :--- | :--- | :--- |
+| :--- | :--- | :--- |
 | **AU-9** | Protection of Audit Information | Audit trail immutability via cryptographic append-only SHA-384 hash chain (`audit_chain`). Protection against unauthenticated access, truncation, or history rewrite. |
 | **AU-9(3)** | Cryptographic Protection | Payload encryption at rest using AES-256-GCM (`audit_crypto:encrypt/3`). Offline archive segment encryption with AEAD tag authentication (`audit_archive`). |
 | **AU-10** | Non-Repudiation | Digital signatures on critical security events using ECDSA P-384 with SHA-384 (`audit_chain:append_critical_record/4`). Signed checkpoint roots (`audit_checkpoint`). RFC 3161 timestamping. |
