@@ -26,6 +26,12 @@ seal_segment(Segment, NodeId, SecPrivKey) when is_list(Segment), is_binary(NodeI
 serialize_archive(Segment, Checkpoint) ->
     term_to_binary({archive, Checkpoint, Segment}, [compressed]).
 
+%% @doc Encrypts and serializes an archive segment using AES-256-GCM (SC-28 / AU-9(3)).
+-spec serialize_archive([#audit_record{}], #audit_checkpoint{}, binary()) -> binary().
+serialize_archive(Segment, Checkpoint, EncKey) when is_binary(EncKey) ->
+    PlainArchive = serialize_archive(Segment, Checkpoint),
+    audit_crypto:encrypt(EncKey, PlainArchive).
+
 %% @doc Deserializes archive binary.
 -spec deserialize_archive(binary()) -> {ok, #audit_checkpoint{}, [#audit_record{}]} | {error, term()}.
 deserialize_archive(Bin) when is_binary(Bin) ->
@@ -37,4 +43,14 @@ deserialize_archive(Bin) when is_binary(Bin) ->
         end
     catch
         _:_ -> {error, corrupt_archive_binary}
+    end.
+
+%% @doc Decrypts and deserializes an encrypted archive binary (SC-28 / AU-9(3)).
+-spec deserialize_archive(binary(), binary()) -> {ok, #audit_checkpoint{}, [#audit_record{}]} | {error, term()}.
+deserialize_archive(EncryptedArchiveBin, EncKey) when is_binary(EncryptedArchiveBin), is_binary(EncKey) ->
+    case audit_crypto:decrypt(EncKey, EncryptedArchiveBin) of
+        {ok, PlainArchive} ->
+            deserialize_archive(PlainArchive);
+        {error, _} ->
+            {error, decrypt_failed}
     end.

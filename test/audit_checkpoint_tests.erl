@@ -28,7 +28,11 @@ checkpoint_creation_and_verify_test() ->
     ?assert(audit_checkpoint:verify(CPWithTSP, PubKey)),
 
     CPRawTSP = CPNoPriv#audit_checkpoint{sig = audit_crypto:sign(PrivKey, PayloadToSign), tsp = crypto:strong_rand_bytes(48)},
-    ?assert(audit_checkpoint:verify(CPRawTSP, PubKey)).
+    ?assert(audit_checkpoint:verify(CPRawTSP, PubKey)),
+
+    %% Checkpoint with sig but undefined TSP (covers line 53)
+    CPNoTSP = CPNoPriv#audit_checkpoint{sig = audit_crypto:sign(PrivKey, PayloadToSign), tsp = undefined},
+    ?assert(audit_checkpoint:verify(CPNoTSP, PubKey)).
 
 tampered_checkpoint_verify_test() ->
     {PubKey, PrivKey} = audit_crypto:generate_keypair(),

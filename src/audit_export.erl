@@ -16,6 +16,32 @@ to_json(Records) when is_list(Records) ->
     Joined = lists:join(",\n", Formatted),
     iolist_to_binary(["[\n", Joined, "\n]"]).
 
+%% @doc Encrypts audit record stream into secure authenticated transit frames (SC-8 / SC-8(1)).
+-spec to_secure_stream(#audit_record{} | [#audit_record{}], binary()) -> binary().
+to_secure_stream(RecordOrRecords, EncKey) when is_binary(EncKey) ->
+    JsonPayload = to_json(RecordOrRecords),
+    TS = integer_to_binary(erlang:system_time(millisecond)),
+    AAD = <<"SC-8-AUDIT-STREAM-v1:", TS/binary>>,
+    EncryptedPayload = audit_crypto:encrypt(EncKey, JsonPayload, AAD),
+    term_to_binary({secure_stream, TS, EncryptedPayload}).
+
+%% @doc Decrypts and parses secure transit frame stream (SC-8 / SC-8(1)).
+-spec from_secure_stream(binary(), binary()) -> {ok, binary()} | {error, term()}.
+from_secure_stream(StreamBin, EncKey) when is_binary(StreamBin), is_binary(EncKey) ->
+    try binary_to_term(StreamBin, [safe]) of
+        {secure_stream, TS, EncryptedPayload} when is_binary(TS), is_binary(EncryptedPayload) ->
+            AAD = <<"SC-8-AUDIT-STREAM-v1:", TS/binary>>,
+            case audit_crypto:decrypt(EncKey, EncryptedPayload, AAD) of
+                {ok, PlainJson} -> {ok, PlainJson};
+                {error, Reason} -> {error, Reason}
+            end;
+        _ ->
+            {error, invalid_stream_format}
+    catch
+        _:_ ->
+            {error, corrupt_stream_binary}
+    end.
+
 %% @doc Exports audit records to Syslog / Wazuh CEF SIEM line format.
 -spec to_siem(#audit_record{}) -> binary().
 to_siem(#audit_record{id = Id, ts = TS, plane = Plane, subject = Subj,

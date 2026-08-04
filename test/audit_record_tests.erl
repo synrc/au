@@ -40,9 +40,45 @@ validation_error_cases_test() ->
     ?assertEqual({error, not_a_record}, audit_record:validate(not_a_record)),
     ?assertEqual({error, invalid_binary}, audit_record:decode(<<"corrupt">>)),
 
+    %% Decode valid binary term but invalid audit record schema
+    InvalidRecordBin = term_to_binary({audit_record, <<>>, 0, invalid, 123, bad, 456, wrong, nil, #{}, <<>>, <<>>, nil, nil}),
+    ?assertEqual({error, invalid_id}, audit_record:decode(InvalidRecordBin)),
+
     R2 = audit_record:new(security, "string_subject", ev, atom_resource, act, success, not_a_map),
     ?assertEqual(<<"string_subject">>, R2#audit_record.subject),
     ?assertEqual(<<"atom_resource">>, R2#audit_record.resource),
 
     PayloadNonMap = audit_record:canonical_payload(R2#audit_record{meta = undefined}),
     ?assert(is_binary(PayloadNonMap)).
+
+payload_encryption_test() ->
+    EncKey = audit_crypto:generate_enc_key(),
+    Meta = #{<<"secret_key">> => <<"val123">>, <<"user_ip">> => <<"192.168.1.50">>},
+    R = audit_record:new(security, <<"user1">>, login, <<"session1">>, auth, success, Meta),
+
+    EncR = audit_record:encrypt_payload(R, EncKey),
+    ?assertNotEqual(Meta, EncR#audit_record.meta),
+    ?assert(maps:is_key(<<"$encrypted_meta">>, EncR#audit_record.meta)),
+
+    {ok, DecR} = audit_record:decrypt_payload(EncR, EncKey),
+    ?assertEqual(Meta, DecR#audit_record.meta),
+
+    WrongKey = audit_crypto:generate_enc_key(),
+    ?assertEqual({error, invalid_tag}, audit_record:decrypt_payload(EncR, WrongKey)),
+
+    %% Decrypting non-encrypted record passes through
+    ?assertEqual({ok, R}, audit_record:decrypt_payload(R, EncKey)),
+
+    %% Decrypting record with corrupted encrypted meta binary
+    CorruptMetaEncR = R#audit_record{meta = #{<<"$encrypted_meta">> => <<"short_invalid">>}},
+    ?assertEqual({error, invalid_ciphertext_format}, audit_record:decrypt_payload(CorruptMetaEncR, EncKey)),
+
+    %% Non-map decrypted meta
+    NonMapEncMeta = audit_crypto:encrypt(EncKey, term_to_binary(not_a_map), R#audit_record.id),
+    NonMapEncR = R#audit_record{meta = #{<<"$encrypted_meta">> => NonMapEncMeta}},
+    ?assertEqual({error, invalid_decrypted_meta}, audit_record:decrypt_payload(NonMapEncR, EncKey)),
+
+    %% Corrupt binary inside decrypted meta
+    CorruptBinEncMeta = audit_crypto:encrypt(EncKey, <<"not_a_valid_term_binary">>, R#audit_record.id),
+    CorruptBinEncR = R#audit_record{meta = #{<<"$encrypted_meta">> => CorruptBinEncMeta}},
+    ?assertEqual({error, corrupt_decrypted_meta}, audit_record:decrypt_payload(CorruptBinEncR, EncKey)).

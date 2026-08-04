@@ -68,6 +68,35 @@ validate({audit_record, Id, TS, Plane, Subj, Ev, Res, Act, Out, _Meta, _PrevHash
 validate(_) ->
     {error, not_a_record}.
 
+%% @doc Encrypts record metadata payload for protection at rest (SC-28 / AU-9(3)).
+-spec encrypt_payload(#audit_record{}, binary()) -> #audit_record{}.
+encrypt_payload(#audit_record{id = Id, meta = Meta} = Record, EncKey) when is_binary(EncKey) ->
+    MetaBin = term_to_binary(Meta),
+    EncryptedMeta = audit_crypto:encrypt(EncKey, MetaBin, Id),
+    Record#audit_record{
+        meta = #{<<"$encrypted_meta">> => EncryptedMeta}
+    }.
+
+%% @doc Decrypts record metadata payload.
+-spec decrypt_payload(#audit_record{}, binary()) -> {ok, #audit_record{}} | {error, term()}.
+decrypt_payload(#audit_record{id = Id, meta = #{<<"$encrypted_meta">> := EncMeta}} = Record, EncKey)
+  when is_binary(EncKey), is_binary(EncMeta) ->
+    case audit_crypto:decrypt(EncKey, EncMeta, Id) of
+        {ok, PlainMetaBin} ->
+            try binary_to_term(PlainMetaBin, [safe]) of
+                DecryptedMeta when is_map(DecryptedMeta) ->
+                    {ok, Record#audit_record{meta = DecryptedMeta}};
+                _ ->
+                    {error, invalid_decrypted_meta}
+            catch
+                _:_ -> {error, corrupt_decrypted_meta}
+            end;
+        {error, Reason} ->
+            {error, Reason}
+    end;
+decrypt_payload(#audit_record{} = Record, _EncKey) ->
+    {ok, Record}.
+
 %% @doc Deterministic canonical binary encoding of payload for hashing &amp; HMAC.
 %% Excludes prev_hash, hmac, sig, and tsp to allow stable hash calculation.
 -spec canonical_payload(#audit_record{}) -> binary().

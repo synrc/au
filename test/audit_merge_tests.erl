@@ -31,19 +31,34 @@ linearize_with_options_test() ->
     MacKey = audit_crypto:generate_mac_key(),
     G1 = audit_chain:genesis_hash(<<"node-1">>, 0),
 
-    R1 = (audit_chain:append_record(audit_record:new(application, <<"u1">>, e1, <<"r1">>, a1, success, #{}), G1, MacKey))#audit_record{ts = 100},
-    R2 = (audit_chain:append_record(audit_record:new(security, <<"u2">>, e2, <<"r2">>, a2, success, #{}), R1#audit_record.prev_hash, MacKey))#audit_record{ts = 200},
-    R3 = (audit_chain:append_record(audit_record:new(system, <<"u3">>, e3, <<"r3">>, a3, success, #{}), R2#audit_record.prev_hash, MacKey))#audit_record{ts = 300},
+    R1 = (audit_chain:append_record(audit_record:new(application, <<"u1">>, e1, <<"r1">>, a1, success, #{<<"node_id">> => <<"node-1">>}), G1, MacKey))#audit_record{ts = 100},
+    R2 = (audit_chain:append_record(audit_record:new(security, <<"u2">>, e2, <<"r2">>, a2, success, #{<<"node_id">> => <<"node-2">>}), R1#audit_record.prev_hash, MacKey))#audit_record{ts = 200},
+    R3 = (audit_chain:append_record(audit_record:new(system, <<"u3">>, e3, <<"r3">>, a3, success, #{<<"node_id">> => <<"node-1">>}), R2#audit_record.prev_hash, MacKey))#audit_record{ts = 300},
+    
+    % Record with same TS and same node_id to trigger Node1 == Node2 fallthrough (line 56 -> line 57)
+    R1_SameTS_Node1_A = (audit_chain:append_record(audit_record:new(application, <<"u1">>, e1, <<"r1">>, a1, success, #{<<"node_id">> => <<"node-1">>}), G1, MacKey))#audit_record{ts = 100},
+    R1_SameTS_Node9 = (audit_chain:append_record(audit_record:new(application, <<"u1">>, e1, <<"r1">>, a1, success, #{<<"node_id">> => <<"node-9">>}), G1, MacKey))#audit_record{ts = 100},
+    R1_SameTS_Node0 = (audit_chain:append_record(audit_record:new(application, <<"u1">>, e1, <<"r1">>, a1, success, #{<<"node_id">> => <<"node-0">>}), G1, MacKey))#audit_record{ts = 100},
 
-    CP = audit_checkpoint:create(<<"node-1">>, [R1, R2, R3], R3#audit_record.prev_hash, undefined),
-    Set = audit_merge:add_node_log(audit_merge:new_log_set(), CP, [R1, R2, R3]),
+    CP1 = audit_checkpoint:create(<<"node-1">>, [R1, R2, R3, R1_SameTS_Node1_A], R3#audit_record.prev_hash, undefined),
+    CP9 = audit_checkpoint:create(<<"node-9">>, [R1_SameTS_Node9], R1_SameTS_Node9#audit_record.prev_hash, undefined),
+    CP0 = audit_checkpoint:create(<<"node-0">>, [R1_SameTS_Node0], R1_SameTS_Node0#audit_record.prev_hash, undefined),
+
+    Set1 = audit_merge:add_node_log(audit_merge:new_log_set(), CP1, [R1, R2, R3, R1_SameTS_Node1_A]),
+    Set9 = audit_merge:add_node_log(audit_merge:new_log_set(), CP9, [R1_SameTS_Node9]),
+    Set0 = audit_merge:add_node_log(audit_merge:new_log_set(), CP0, [R1_SameTS_Node0]),
+    Set = audit_merge:merge(Set1, audit_merge:merge(Set9, Set0)),
+
+    % Linearize sorts properly
+    Sorted = audit_merge:linearize(Set),
+    ?assertEqual(6, length(Sorted)),
 
     % Filter by timestamp range (from_ts and to_ts individually)
     TSFiltered = audit_merge:linearize(Set, #{from_ts => 150, to_ts => 350}),
     ?assertEqual(2, length(TSFiltered)),
 
     ToTSOnly = audit_merge:linearize(Set, #{to_ts => 150}),
-    ?assertEqual(1, length(ToTSOnly)),
+    ?assertEqual(4, length(ToTSOnly)),
 
     % Filter by plane
     SecFiltered = audit_merge:linearize(Set, #{plane => security}),
@@ -54,14 +69,14 @@ linearize_with_options_test() ->
     ?assertEqual(2, length(Limited)),
 
     % Linearize with duplicate record IDs
-    SetWithDup = audit_merge:add_node_log(Set, CP, [R1, R1, R2, R3]),
+    SetWithDup = audit_merge:add_node_log(Set, CP1, [R1, R1, R2, R3]),
     LinearDup = audit_merge:linearize(SetWithDup, #{limit => undefined}),
-    ?assertEqual(3, length(LinearDup)),
+    ?assertEqual(6, length(LinearDup)),
 
     % Merge where CP2 has higher record count than CP1
-    CP_Higher = CP#audit_checkpoint{record_count = 100},
-    SetCP2Higher = audit_merge:add_node_log(Set, CP_Higher, [R1, R2, R3]),
-    MergedCP2 = audit_merge:merge(Set, SetCP2Higher),
+    CP_Higher = CP1#audit_checkpoint{record_count = 100},
+    SetCP2Higher = audit_merge:add_node_log(Set1, CP_Higher, [R1, R2, R3]),
+    MergedCP2 = audit_merge:merge(Set1, SetCP2Higher),
     ?assertEqual(100, (element(1, maps:get(<<"node-1">>, MergedCP2)))#audit_checkpoint.record_count).
 
 global_merkle_root_test() ->
@@ -79,9 +94,16 @@ global_merkle_root_test() ->
     R2 = audit_chain:append_record(audit_record:new(system, <<"s2">>, e2, <<"r2">>, a2, success, #{}), G2, MacKey),
     CP2 = audit_checkpoint:create(<<"node-2">>, [R2], R2#audit_record.prev_hash, PrivKey),
 
+    G3 = audit_chain:genesis_hash(<<"node-3">>, 0),
+    R3 = audit_chain:append_record(audit_record:new(system, <<"s3">>, e3, <<"r3">>, a3, success, #{}), G3, MacKey),
+    CP3 = audit_checkpoint:create(<<"node-3">>, [R3], R3#audit_record.prev_hash, PrivKey),
+
     Set = audit_merge:merge(
         audit_merge:add_node_log(audit_merge:new_log_set(), CP1, [R1]),
-        audit_merge:add_node_log(audit_merge:new_log_set(), CP2, [R2])
+        audit_merge:merge(
+            audit_merge:add_node_log(audit_merge:new_log_set(), CP2, [R2]),
+            audit_merge:add_node_log(audit_merge:new_log_set(), CP3, [R3])
+        )
     ),
 
     GlobalRoot = audit_merge:global_merkle_root(Set),
@@ -97,12 +119,18 @@ diff_and_delta_test() ->
 
     CP1 = audit_checkpoint:create(<<"node-1">>, [R1], R1#audit_record.prev_hash, undefined),
     CP2 = audit_checkpoint:create(<<"node-1">>, [R1, R2], R2#audit_record.prev_hash, undefined),
+    CP3 = audit_checkpoint:create(<<"node-2">>, [R2], R2#audit_record.prev_hash, undefined),
 
     SetA = audit_merge:add_node_log(audit_merge:new_log_set(), CP1, [R1]),
     SetB = audit_merge:add_node_log(audit_merge:new_log_set(), CP2, [R1, R2]),
+    SetC = audit_merge:add_node_log(audit_merge:new_log_set(), CP3, [R2]),
 
     Diff = audit_merge:diff(SetA, SetB),
     ?assertEqual(1, maps:size(Diff)),
+
+    % Diff where SetC has node-2 missing completely in SetA (covers line 96)
+    DiffMissingNode = audit_merge:diff(SetA, SetC),
+    ?assertEqual(1, maps:size(DiffMissingNode)),
 
     Delta = audit_merge:delta(SetB, #{<<"node-1">> => 1}),
     ?assertEqual(1, maps:size(Delta)),
@@ -123,6 +151,11 @@ stats_test() ->
     ?assertEqual(1, maps:get(<<"node_count">>, Stats)),
     ?assertEqual(1, maps:get(<<"total_records">>, Stats)),
     ?assert(maps:is_key(<<"global_merkle_root">>, Stats)),
+
+    % Cover verify_merged with empty records list in log entry (covers line 82)
+    CPEmptyRecs = audit_checkpoint:create(<<"node-empty">>, [], G1, undefined),
+    SetEmptyRecs = audit_merge:add_node_log(audit_merge:new_log_set(), CPEmptyRecs, []),
+    ?assert(audit_merge:verify_merged(SetEmptyRecs, undefined)),
 
     % Cover empty stats
     EmptyStats = audit_merge:stats(audit_merge:new_log_set()),

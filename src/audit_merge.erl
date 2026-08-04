@@ -50,10 +50,8 @@ linearize(LogSet, Opts) when is_map(LogSet), is_map(Opts) ->
         Node1 = maps:get(<<"node_id">>, M1, <<>>),
         Node2 = maps:get(<<"node_id">>, M2, <<>>),
         if
-            TS1 < TS2 -> true;
-            TS1 > TS2 -> false;
-            Node1 < Node2 -> true;
-            Node1 > Node2 -> false;
+            TS1 =/= TS2 -> TS1 < TS2;
+            Node1 =/= Node2 -> Node1 < Node2;
             true -> Id1 =< Id2
         end
     end, Deduplicated),

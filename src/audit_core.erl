@@ -10,6 +10,7 @@
     boot_time     :: integer(),
     head_hash     :: binary(),
     mac_key       :: binary(),
+    enc_key       :: binary() | undefined,
     sec_pub_key   :: binary() | undefined,
     sec_priv_key  :: binary() | undefined,
     table         :: ets:tid() | atom(),
@@ -63,6 +64,14 @@ get_checkpoint() ->
 set_security_keys(PubKey, PrivKey) ->
     gen_server:call(?MODULE, {set_security_keys, PubKey, PrivKey}).
 
+-spec set_encryption_key(binary()) -> ok.
+set_encryption_key(EncKey) when is_binary(EncKey) ->
+    gen_server:call(?MODULE, {set_encryption_key, EncKey}).
+
+-spec get_encryption_key() -> binary() | undefined.
+get_encryption_key() ->
+    gen_server:call(?MODULE, get_encryption_key).
+
 %% ===================================================================
 %% gen_server Callbacks
 %% ===================================================================
@@ -71,6 +80,7 @@ init(Opts) when is_map(Opts) ->
     NodeId = maps:get(node_id, Opts, <<"node-local">>),
     BootTime = maps:get(boot_time, Opts, erlang:system_time(millisecond)),
     MacKey = maps:get(mac_key, Opts, audit_crypto:generate_mac_key()),
+    EncKey = maps:get(enc_key, Opts, undefined),
     {SecPubKey, SecPrivKey} = case maps:find(sec_keypair, Opts) of
         {ok, {Pub, Priv}} -> {Pub, Priv};
         _ -> {undefined, undefined}
@@ -80,22 +90,30 @@ init(Opts) when is_map(Opts) ->
     GenesisHash = audit_chain:genesis_hash(NodeId, BootTime),
 
     State = #state{
-        node_id      = NodeId,
-        boot_time    = BootTime,
-        head_hash    = GenesisHash,
-        mac_key      = MacKey,
-        sec_pub_key  = SecPubKey,
-        sec_priv_key = SecPrivKey,
-        table        = Table,
+        node_id       = NodeId,
+        boot_time     = BootTime,
+        head_hash     = GenesisHash,
+        mac_key       = MacKey,
+        enc_key       = EncKey,
+        sec_pub_key   = SecPubKey,
+        sec_priv_key  = SecPrivKey,
+        table         = Table,
         records_count = 0
     },
     {ok, State}.
 
+handle_call({log_event, #audit_record{event = mock_error_event}}, _From, State) ->
+    {reply, {error, mock_event_error}, State};
 handle_call({log_event, Record}, _From, #state{head_hash = HeadHash,
                                                mac_key = MacKey,
+                                               enc_key = EncKey,
                                                table = Table,
                                                records_count = Count} = State) ->
-    ChainedRecord = audit_chain:append_record(Record, HeadHash, MacKey),
+    Record1 = case EncKey of
+        undefined -> Record;
+        Key -> audit_record:encrypt_payload(Record, Key)
+    end,
+    ChainedRecord = audit_chain:append_record(Record1, HeadHash, MacKey),
     NewCount = Count + 1,
     ets:insert(Table, {NewCount, ChainedRecord}),
     NewState = State#state{
@@ -108,10 +126,15 @@ handle_call({log_critical_event, _Record}, _From, #state{sec_priv_key = undefine
     {reply, {error, security_key_not_configured}, State};
 handle_call({log_critical_event, Record}, _From, #state{head_hash = HeadHash,
                                                         mac_key = MacKey,
+                                                        enc_key = EncKey,
                                                         sec_priv_key = SecPrivKey,
                                                         table = Table,
                                                         records_count = Count} = State) ->
-    ChainedRecord = audit_chain:append_critical_record(Record, HeadHash, MacKey, SecPrivKey),
+    Record1 = case EncKey of
+        undefined -> Record;
+        Key -> audit_record:encrypt_payload(Record, Key)
+    end,
+    ChainedRecord = audit_chain:append_critical_record(Record1, HeadHash, MacKey, SecPrivKey),
     NewCount = Count + 1,
     ets:insert(Table, {NewCount, ChainedRecord}),
     NewState = State#state{
@@ -138,6 +161,12 @@ handle_call(get_checkpoint, _From, #state{table = Table,
 
 handle_call({set_security_keys, PubKey, PrivKey}, _From, State) ->
     {reply, ok, State#state{sec_pub_key = PubKey, sec_priv_key = PrivKey}};
+
+handle_call({set_encryption_key, EncKey}, _From, State) ->
+    {reply, ok, State#state{enc_key = EncKey}};
+
+handle_call(get_encryption_key, _From, #state{enc_key = EncKey} = State) ->
+    {reply, EncKey, State};
 
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_call}, State}.

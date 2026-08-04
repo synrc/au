@@ -33,3 +33,43 @@ hash_test() ->
     ?assertEqual(48, byte_size(H384)),
     ?assertEqual(64, byte_size(H512)),
     ?assertNot(audit_crypto:verify(<<"invalid_key">>, Data, <<"invalid_sig">>)).
+
+aes_256_gcm_encryption_test() ->
+    EncKey = audit_crypto:generate_enc_key(),
+    ?assertEqual(32, byte_size(EncKey)),
+    Plaintext = <<"Confidential Audit Payload SC-28 AU-9(3)">>,
+    AAD = <<"record_id_123">>,
+    
+    Encrypted = audit_crypto:encrypt(EncKey, Plaintext, AAD),
+    ?assert(is_binary(Encrypted)),
+    ?assert(byte_size(Encrypted) > byte_size(Plaintext)),
+
+    {ok, Decrypted} = audit_crypto:decrypt(EncKey, Encrypted, AAD),
+    ?assertEqual(Plaintext, Decrypted),
+
+    %% Test without explicit AAD
+    Encrypted2 = audit_crypto:encrypt(EncKey, Plaintext),
+    {ok, Decrypted2} = audit_crypto:decrypt(EncKey, Encrypted2),
+    ?assertEqual(Plaintext, Decrypted2),
+
+    %% Test invalid tag / AAD mismatch
+    ?assertEqual({error, invalid_tag}, audit_crypto:decrypt(EncKey, Encrypted, <<"wrong_aad">>)),
+
+    %% Test corrupted ciphertext
+    <<IV:12/binary, Tag:16/binary, _Rest/binary>> = Encrypted,
+    CorruptCipher = <<IV:12/binary, Tag:16/binary, "corrupted_bytes_00000">>,
+    ?assertEqual({error, invalid_tag}, audit_crypto:decrypt(EncKey, CorruptCipher, AAD)),
+
+    %% Test invalid ciphertext binary format (too short)
+    ?assertEqual({error, invalid_ciphertext_format}, audit_crypto:decrypt(EncKey, <<"short_bin">>)),
+
+    %% Test decrypt catch path (decrypt_failed) when passing invalid key size
+    InvalidKeySize = <<"bad_key_length">>,
+    ?assertEqual({error, decrypt_failed}, audit_crypto:decrypt(InvalidKeySize, Encrypted)).
+
+timestamp_token_test() ->
+    Digest = audit_crypto:hash(<<"some_data">>),
+    TS = erlang:system_time(millisecond),
+    Token = audit_crypto:timestamp_token(Digest, TS),
+    ?assert(audit_crypto:verify_timestamp(Token, Digest, TS)),
+    ?assertNot(audit_crypto:verify_timestamp(Token, Digest, TS + 1000)).

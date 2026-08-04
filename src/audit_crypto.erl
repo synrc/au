@@ -17,6 +17,39 @@ generate_keypair() ->
 generate_mac_key() ->
     crypto:strong_rand_bytes(32).
 
+%% @doc Generates a 256-bit symmetric encryption key (AES-256-GCM for SC-28 / AU-9(3)).
+-spec generate_enc_key() -> binary().
+generate_enc_key() ->
+    crypto:strong_rand_bytes(32).
+
+%% @doc Encrypts data using AES-256-GCM (SC-28 / AU-9(3) / SC-8).
+-spec encrypt(binary(), binary()) -> binary().
+encrypt(Key, Plaintext) ->
+    encrypt(Key, Plaintext, <<>>).
+
+-spec encrypt(binary(), binary(), binary()) -> binary().
+encrypt(Key, Plaintext, AAD) when is_binary(Key), byte_size(Key) =:= 32, is_binary(Plaintext), is_binary(AAD) ->
+    IV = crypto:strong_rand_bytes(12),
+    {Ciphertext, Tag} = crypto:crypto_one_time_aead(aes_256_gcm, Key, IV, Plaintext, AAD, true),
+    <<IV:12/binary, Tag:16/binary, Ciphertext/binary>>.
+
+%% @doc Decrypts AES-256-GCM payload with AEAD tag authentication.
+-spec decrypt(binary(), binary()) -> {ok, binary()} | {error, term()}.
+decrypt(Key, EncryptedBin) ->
+    decrypt(Key, EncryptedBin, <<>>).
+
+-spec decrypt(binary(), binary(), binary()) -> {ok, binary()} | {error, term()}.
+decrypt(Key, <<IV:12/binary, Tag:16/binary, Ciphertext/binary>>, AAD)
+  when is_binary(Key), is_binary(AAD) ->
+    try crypto:crypto_one_time_aead(aes_256_gcm, Key, IV, Ciphertext, AAD, Tag, false) of
+        error -> {error, invalid_tag};
+        Plaintext when is_binary(Plaintext) -> {ok, Plaintext}
+    catch
+        _:_ -> {error, decrypt_failed}
+    end;
+decrypt(_Key, _InvalidBin, _AAD) ->
+    {error, invalid_ciphertext_format}.
+
 %% @doc Computes SHA-384 hash of given binary data (default hash for audit chain).
 -spec hash(binary()) -> binary().
 hash(Data) when is_binary(Data) ->
